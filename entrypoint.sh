@@ -41,7 +41,7 @@ done
 
 [ -n "$mounted" ] || echo "WARNING: nothing found under /sources - add volumes in docker-compose.yml"
 
-AUTH=""
-[ -n "$WEBDAV_USER" ] && AUTH="--user $WEBDAV_USER --pass $WEBDAV_PASS"
+# Credentials go through env vars (not argv) so they never show up in ps output
+[ -n "$WEBDAV_USER" ] && export RCLONE_USER="$WEBDAV_USER" RCLONE_PASS="$WEBDAV_PASS"
 
-exec rclone serve webdav /view --addr :8080 --read-only $AUTH $RCLONE_OPTS
+exec rclone serve webdav /view --addr :8080 --read-only $RCLONE_OPTS
