@@ -25,16 +25,16 @@ services:
       # - "E:/tv:/sources/tv:ro"
       # - "D:/Downloads:/sources/downloads:ro"
       #
-      # Merge several folders into one: name them <name>@<anything>.
-      # E:\tv and F:\tv both show up together in K:\tv
-      - "E:/tv:/sources/tv@e:ro"
-      - "F:/tv:/sources/tv@f:ro"
       # Subfolders inside one folder: mount at /sources/<name>/<sub>
+      # -> K:\tv\tv-1, tv-2
+      - "F:/tv:/sources/tv/tv-1:ro"
+      - "E:/tv:/sources/tv/tv-2:ro"
       # -> K:\films\films-1, films-2, films-3
       - "I:/x264:/sources/films/films-1:ro"
       - "F:/Movies 2:/sources/films/films-2:ro"
       - "E:/films-3:/sources/films/films-3:ro"
-      # H:\Training and H:\Training-2 -> K:\training
+      # Merge several folders into one: name them <name>@<anything>.
+      # H:\Training and H:\Training-2 both show up together in K:\training
       - "H:/Training:/sources/training@1:ro"
       - "H:/Training-2:/sources/training@2:ro"
       # Single folders
