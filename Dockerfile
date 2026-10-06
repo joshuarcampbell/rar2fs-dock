@@ -16,7 +16,7 @@ RUN wget -qO- https://github.com/hasse69/rar2fs/archive/refs/tags/v${RAR2FS_VERS
 # ---- runtime ----
 FROM debian:bookworm-slim
 RUN apt-get update \
- && apt-get install -y --no-install-recommends fuse libfuse2 rclone ca-certificates tini \
+ && apt-get install -y --no-install-recommends fuse libfuse2 mergerfs rclone ca-certificates tini \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=build /usr/lib/libunrar.so /usr/lib/
 COPY --from=build /usr/local/bin/rar2fs /usr/local/bin/

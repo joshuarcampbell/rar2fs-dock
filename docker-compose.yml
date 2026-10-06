@@ -8,15 +8,23 @@ services:
     devices: [/dev/fuse]
     security_opt: [apparmor:unconfined]
     ports:
-      - "127.0.0.1:8080:8080"   # WebDAV, map as a drive on Windows
+      - "127.0.0.1:8765:8080"   # WebDAV, mounted on Windows by windows/mount.ps1
     environment:
       RAR2FS_OPTS: "--seek-length=1"   # only scan first volume header; faster on big sets
       # WEBDAV_USER: josh
       # WEBDAV_PASS: changeme
     volumes:
       # Each folder under /sources/<name> shows up as <drive>:\<name>
-      # Local drives/folders:
-      - "D:/Downloads:/sources/downloads:ro"
+      # Format: "<Windows path, forward slashes>:/sources/<name>:ro"
+      #
+      # Local drives/folders, e.g. E:\tv -> K:\tv
+      # - "E:/tv:/sources/tv:ro"
+      # - "D:/Downloads:/sources/downloads:ro"
+      #
+      # Merge several folders into one: name them <name>@<anything>.
+      # E:\tv and F:\tv both show up together in K:\tv
+      # - "E:/tv:/sources/tv@e:ro"
+      # - "F:/tv:/sources/tv@f:ro"
       # Network share (defined below):
       # - nas:/sources/nas:ro
 
