@@ -127,6 +127,8 @@ same values to the scripts:
 
 - **The drive is empty or shows an error** - the container isn't running yet. Check
   `docker ps`; the drive recovers on its own once the container is up.
+- **A newly added folder is empty on the drive** - the drive caches folder listings for
+  1 minute. Wait a minute and refresh.
 - **A source folder is missing** - check `docker logs rar2fs` for its `rar2fs:` line,
   and make sure the path in `docker-compose.yml` exists.
 - **Drive letter already in use** - `mount.ps1` stops with an error; pick another with `-Drive`.
