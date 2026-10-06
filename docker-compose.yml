@@ -14,7 +14,10 @@ services:
       # use "127.0.0.1:8765:8080" to limit it to this PC.
       - "8765:8080"
     environment:
-      RAR2FS_OPTS: "--seek-length=1"   # only scan first volume header; faster on big sets
+      # --seek-length=1: only read the first volume's header (faster on big sets)
+      # -o warmup: read every archive's header in the background at startup, so
+      #   the first folder listing / Plex scan is fast instead of slow
+      RAR2FS_OPTS: "--seek-length=1 -o warmup"
       WEBDAV_USER: ${WEBDAV_USER:?set WEBDAV_USER in .env}
       WEBDAV_PASS: ${WEBDAV_PASS:?set WEBDAV_PASS in .env}
     volumes:
