@@ -1,7 +1,7 @@
 # Registers a scheduled task that mounts the drive in the background each time you log in.
 # Run once from a normal (non-admin) PowerShell. Re-run to change settings.
 param(
-    [string]$Drive = "K:",
+    [string]$Drive = "Y:",
     [string]$Url = "http://localhost:8765",
     [string]$User = "",
     [string]$Pass = ""

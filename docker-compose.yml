@@ -19,20 +19,20 @@ services:
       # Each folder under /sources/<name> shows up as <drive>:\<name>
       # Format: "<Windows path, forward slashes>:/sources/<name>:ro"
       #
-      # Local drives/folders, e.g. E:\tv -> K:\tv
+      # Local drives/folders, e.g. E:\tv -> Y:\tv
       # - "E:/tv:/sources/tv:ro"
       # - "D:/Downloads:/sources/downloads:ro"
       #
       # Merge several folders into one: name them <name>@<anything>.
-      # E:\tv and F:\tv both show up together in K:\tv
+      # E:\tv and F:\tv both show up together in Y:\tv
       - "E:/tv:/sources/tv@e:ro"
       - "F:/tv:/sources/tv@f:ro"
       # Subfolders inside one folder: mount at /sources/<name>/<sub>
-      # -> K:\films\films-1, films-2, films-3
+      # -> Y:\films\films-1, films-2, films-3
       - "I:/x264:/sources/films/films-1:ro"
       - "F:/Movies 2:/sources/films/films-2:ro"
       - "E:/films-3:/sources/films/films-3:ro"
-      # H:\Training and H:\Training-2 -> K:\training
+      # H:\Training and H:\Training-2 -> Y:\training
       - "H:/Training:/sources/training@1:ro"
       - "H:/Training-2:/sources/training@2:ro"
       # Single folders

@@ -5,11 +5,11 @@ unpacking, no extra disk space.
 
 [rar2fs](https://github.com/hasse69/rar2fs) runs inside a Docker container and reads
 your local folders and network shares. The extracted view is served to Windows and
-mounted as a normal drive letter (e.g. `K:`).
+mounted as a normal drive letter (e.g. `Y:`).
 
 ```
  D:\Downloads ─┐                    ┌──────── Docker ────────┐
- \nas\media  ─┼─► /sources/<name> ─► rar2fs ─► WebDAV :8765 ─┼─► rclone + WinFsp ─► K:\
+ \nas\media  ─┼─► /sources/<name> ─► rar2fs ─► WebDAV :8765 ─┼─► rclone + WinFsp ─► Y:\
                │                    └────────────────────────┘
 ```
 
@@ -28,7 +28,7 @@ After installing rclone, open a **new** PowerShell window so it's on your PATH.
 ### 1. Choose your source folders
 
 Edit `docker-compose.yml`. Every volume mounted at `/sources/<name>` shows up as
-`K:\<name>`.
+`Y:\<name>`.
 
 **Local folder or drive:**
 
@@ -45,8 +45,8 @@ drive (Settings → Resources → File sharing, if it asks).
 
 ```yaml
 volumes:
-  - "I:/x264:/sources/films/films-1:ro"        # -> K:\films\films-1
-  - "F:/Movies 2:/sources/films/films-2:ro"    # -> K:\films\films-2
+  - "I:/x264:/sources/films/films-1:ro"        # -> Y:\films\films-1
+  - "F:/Movies 2:/sources/films/films-2:ro"    # -> Y:\films\films-2
 ```
 
 **Several folders merged into one:** give them the same name followed by `@` and any
@@ -55,7 +55,7 @@ label. Their contents appear together in one folder:
 ```yaml
 volumes:
   - "E:/tv:/sources/tv@e:ro"
-  - "F:/tv:/sources/tv@f:ro"     # E:\tv + F:\tv -> K:\tv
+  - "F:/tv:/sources/tv@f:ro"     # E:\tv + F:\tv -> Y:\tv
 ```
 
 This works with network shares too (`- nas:/sources/tv@nas:ro`). If the same file or
@@ -102,12 +102,12 @@ see a folder for each source.
 .\windows\install-autostart.ps1
 ```
 
-Both accept `-Drive X:` to use a different letter. `K:` is the default.
+Both accept `-Drive X:` to use a different letter. `Y:` is the default.
 
 If PowerShell refuses to run the scripts, run this first:
 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
 
-That's it - open `K:\` in Explorer.
+That's it - open `Y:\` in Explorer.
 
 ## Everyday use
 
@@ -142,6 +142,22 @@ same values to the scripts:
 - **Drive letter already in use** - `mount.ps1` stops with an error; pick another with `-Drive`.
 - **Port 8765 already in use** - change the left side of `127.0.0.1:8765:8080` in
   `docker-compose.yml` and pass the new address with `-Url http://localhost:<port>`.
+
+## Security
+
+- **Your drives are read-only, and stay that way.** FUSE requires the container to have
+  the `SYS_ADMIN` capability, which would normally let root inside it remount `:ro`
+  folders as writable. To prevent that, nothing in the container runs as root:
+  rar2fs, mergerfs and rclone run as an unprivileged user with no capabilities. Only
+  the small setuid `fusermount` helpers use `SYS_ADMIN`, and only to create the mounts.
+- **Only this PC can connect.** The server listens on `127.0.0.1`, so other machines on
+  your network can't reach it. Other programs and users on this PC can, unless you set
+  a password (see above).
+- **Pinned downloads.** The unrar and rar2fs source downloads are checked against
+  SHA-256 hashes in the `Dockerfile`. Update the hash whenever you change a version.
+- **Keep it updated.** rar2fs uses unrar to read archives, and unrar has had security
+  bugs before. Rebuild now and then with `docker compose build --pull` and
+  `docker compose up -d`, and bump `UNRAR_VERSION` when rarlab releases a new version.
 
 ## Why this design
 
