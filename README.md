@@ -62,20 +62,25 @@ This works with network shares too (`- nas:/sources/tv@nas:ro`). If the same fil
 folder exists in more than one source, the folders' contents are combined, and for a
 file, the first source alphabetically by label wins.
 
-**Network share (SMB/CIFS):** uncomment the `nas` examples and fill in your details:
+**Network share (SMB/CIFS):** add one entry per NAS folder at the bottom of
+`docker-compose.yml` (at the left margin, not inside `services:`), then mount it like
+any other source - it can go anywhere, including inside a subfolder group:
 
 ```yaml
     volumes:
-      - nas:/sources/nas:ro
+      - nas-tv:/sources/tv/tv-3:ro          # -> Y:\tv\tv-3
 
 volumes:
-  nas:
-    driver: local
+  nas-tv:
     driver_opts:
-      type: cifs
-      device: "//192.168.1.50/media"
-      o: "username=USER,password=PASS,vers=3.0,ro,uid=0,gid=0"
+      <<: *nas-options
+      device: "//nas.example.com/share/TV"  # point straight at the folder you want
 ```
+
+`*nas-options` (defined just above `volumes:`) holds the shared settings; the login
+comes from `NAS_USER` / `NAS_PASS` in `.env`. After changing a share's `device`, run
+`docker compose down` then `docker compose up -d` - Docker keeps a volume's old
+settings until it's recreated.
 
 ### 2. Set a password
 
