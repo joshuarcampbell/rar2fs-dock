@@ -10,11 +10,13 @@ services:
     devices: [/dev/fuse]
     security_opt: [apparmor:unconfined]
     ports:
-      - "127.0.0.1:8765:8080"   # WebDAV, mounted on Windows by windows/mount.ps1
+      # WebDAV. "8765:8080" is reachable from your network (needs a password in .env);
+      # use "127.0.0.1:8765:8080" to limit it to this PC.
+      - "8765:8080"
     environment:
       RAR2FS_OPTS: "--seek-length=1"   # only scan first volume header; faster on big sets
-      # WEBDAV_USER: josh
-      # WEBDAV_PASS: changeme
+      WEBDAV_USER: ${WEBDAV_USER:?set WEBDAV_USER in .env}
+      WEBDAV_PASS: ${WEBDAV_PASS:?set WEBDAV_PASS in .env}
     volumes:
       # Each folder under /sources/<name> shows up as <drive>:\<name>
       # Format: "<Windows path, forward slashes>:/sources/<name>:ro"

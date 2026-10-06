@@ -109,6 +109,47 @@ If PowerShell refuses to run the scripts, run this first:
 
 That's it - open `K:\` in Explorer.
 
+## Using it from other machines (e.g. a Linux Plex server)
+
+The server is reachable from your network at `http://<this-PC's-IP>:8765`, protected
+by the password in `.env` (copy `.env.example` to create it). Compose won't start
+without one.
+
+**1. Allow it through Windows Firewall** (admin PowerShell, once):
+
+```powershell
+New-NetFirewallRule -DisplayName "rar2fs-dock WebDAV" -Direction Inbound -Protocol TCP -LocalPort 8765 -Action Allow -Profile Private
+```
+
+**2. On the Linux machine**, install rclone and copy the files from `linux/`:
+
+```bash
+sudo apt install rclone fuse3
+sudo mkdir -p /etc/rar2fs/mounts
+sudo cp rar2fs@.service /etc/systemd/system/
+sudo cp common.conf /etc/rar2fs/ && sudo chmod 600 /etc/rar2fs/common.conf
+sudo cp mounts/*.conf /etc/rar2fs/mounts/
+sudo systemctl daemon-reload
+```
+
+`common.conf` holds the server address and login. It's gitignored; create it from
+`common.conf.example` (the password must be the output of `rclone obscure`).
+
+**3. One mount per folder.** Each file in `mounts/` says which server folder goes
+where:
+
+```ini
+REMOTE=films
+MOUNTPOINT=/mnt/media/films
+```
+
+Start one with `sudo systemctl enable --now rar2fs@<file name without .conf>`.
+
+If a path was previously an SMB/CIFS mount, unmount it and comment out its
+`/etc/fstab` line first. In Plex, turn off *Settings → Library → Empty trash
+automatically after every scan* - if this PC is off during a scan, Plex would
+otherwise see empty folders and drop those items.
+
 ## Everyday use
 
 | To... | Run |

@@ -1,0 +1,24 @@
+# Mounts one rar2fs folder from the Windows PC at a local path.
+# Instance name = config file in /etc/rar2fs/mounts/<name>.conf
+#   sudo systemctl enable --now rar2fs@flac
+[Unit]
+Description=rar2fs mount (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+# RCLONE_WEBDAV_URL / _USER / _PASS - rclone reads these directly
+EnvironmentFile=/etc/rar2fs/common.conf
+# REMOTE (folder on the server) and MOUNTPOINT (local path)
+EnvironmentFile=/etc/rar2fs/mounts/%i.conf
+ExecStartPre=/bin/mkdir -p ${MOUNTPOINT}
+ExecStart=/usr/bin/rclone mount :webdav:${REMOTE} ${MOUNTPOINT} \
+  --read-only --allow-other \
+  --dir-cache-time 1h --poll-interval 0 \
+  --vfs-cache-mode off --buffer-size 64M
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
