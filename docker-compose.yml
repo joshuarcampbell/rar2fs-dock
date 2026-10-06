@@ -1,0 +1,29 @@
+services:
+  rar2fs:
+    build: .
+    container_name: rar2fs
+    restart: unless-stopped
+    # FUSE needs these inside the container
+    cap_add: [SYS_ADMIN]
+    devices: [/dev/fuse]
+    security_opt: [apparmor:unconfined]
+    ports:
+      - "127.0.0.1:8080:8080"   # WebDAV, map as a drive on Windows
+    environment:
+      RAR2FS_OPTS: "--seek-length=1"   # only scan first volume header; faster on big sets
+      # WEBDAV_USER: josh
+      # WEBDAV_PASS: changeme
+    volumes:
+      # Each folder under /sources/<name> shows up as <drive>:\<name>
+      # Local drives/folders:
+      - "D:/Downloads:/sources/downloads:ro"
+      # Network share (defined below):
+      # - nas:/sources/nas:ro
+
+# volumes:
+#   nas:
+#     driver: local
+#     driver_opts:
+#       type: cifs
+#       device: "//192.168.1.50/media"
+#       o: "username=USER,password=PASS,vers=3.0,ro,uid=0,gid=0"
