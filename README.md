@@ -5,11 +5,11 @@ unpacking, no extra disk space.
 
 [rar2fs](https://github.com/hasse69/rar2fs) runs inside a Docker container and reads
 your local folders and network shares. The extracted view is served to Windows and
-mounted as a normal drive letter (e.g. `Y:`).
+mounted as a normal drive letter (e.g. `K:`).
 
 ```
  D:\Downloads ─┐                    ┌──────── Docker ────────┐
- \nas\media  ─┼─► /sources/<name> ─► rar2fs ─► WebDAV :8765 ─┼─► rclone + WinFsp ─► Y:\
+ \nas\media  ─┼─► /sources/<name> ─► rar2fs ─► WebDAV :8765 ─┼─► rclone + WinFsp ─► K:\
                │                    └────────────────────────┘
 ```
 
@@ -28,7 +28,7 @@ After installing rclone, open a **new** PowerShell window so it's on your PATH.
 ### 1. Choose your source folders
 
 Edit `docker-compose.yml`. Every volume mounted at `/sources/<name>` shows up as
-`Y:\<name>`.
+`K:\<name>`.
 
 **Local folder or drive:**
 
@@ -45,8 +45,8 @@ drive (Settings → Resources → File sharing, if it asks).
 
 ```yaml
 volumes:
-  - "I:/x264:/sources/films/films-1:ro"        # -> Y:\films\films-1
-  - "F:/Movies 2:/sources/films/films-2:ro"    # -> Y:\films\films-2
+  - "I:/x264:/sources/films/films-1:ro"        # -> K:\films\films-1
+  - "F:/Movies 2:/sources/films/films-2:ro"    # -> K:\films\films-2
 ```
 
 **Several folders merged into one:** give them the same name followed by `@` and any
@@ -55,7 +55,7 @@ label. Their contents appear together in one folder:
 ```yaml
 volumes:
   - "E:/tv:/sources/tv@e:ro"
-  - "F:/tv:/sources/tv@f:ro"     # E:\tv + F:\tv -> Y:\tv
+  - "F:/tv:/sources/tv@f:ro"     # E:\tv + F:\tv -> K:\tv
 ```
 
 This works with network shares too (`- nas:/sources/tv@nas:ro`). If the same file or
@@ -102,12 +102,12 @@ see a folder for each source.
 .\windows\install-autostart.ps1
 ```
 
-Both accept `-Drive X:` to use a different letter. `Y:` is the default.
+Both accept `-Drive X:` to use a different letter. `K:` is the default.
 
 If PowerShell refuses to run the scripts, run this first:
 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
 
-That's it - open `Y:\` in Explorer.
+That's it - open `K:\` in Explorer.
 
 ## Everyday use
 
