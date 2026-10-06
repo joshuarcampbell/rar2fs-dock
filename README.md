@@ -41,6 +41,14 @@ volumes:
 Use forward slashes in Windows paths. Docker Desktop must be allowed to access that
 drive (Settings → Resources → File sharing, if it asks).
 
+**Several folders as subfolders of one:** mount them one level deeper:
+
+```yaml
+volumes:
+  - "I:/x264:/sources/films/films-1:ro"        # -> K:\films\films-1
+  - "F:/Movies 2:/sources/films/films-2:ro"    # -> K:\films\films-2
+```
+
 **Several folders merged into one:** give them the same name followed by `@` and any
 label. Their contents appear together in one folder:
 
