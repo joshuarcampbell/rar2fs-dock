@@ -5,11 +5,11 @@ unpacking, no extra disk space.
 
 [rar2fs](https://github.com/hasse69/rar2fs) runs inside a Docker container and reads
 your local folders and network shares. The extracted view is served to Windows and
-mounted as a normal drive letter (e.g. `K:`).
+mounted as a normal drive letter (e.g. `Y:`).
 
 ```
  D:\Downloads ─┐                    ┌──────── Docker ────────┐
- \nas\media  ─┼─► /sources/<name> ─► rar2fs ─► WebDAV :8765 ─┼─► rclone + WinFsp ─► K:\
+ \nas\media  ─┼─► /sources/<name> ─► rar2fs ─► WebDAV :8765 ─┼─► rclone + WinFsp ─► Y:\
                │                    └────────────────────────┘
 ```
 
@@ -28,7 +28,7 @@ After installing rclone, open a **new** PowerShell window so it's on your PATH.
 ### 1. Choose your source folders
 
 Edit `docker-compose.yml`. Every volume mounted at `/sources/<name>` shows up as
-`K:\<name>`.
+`Y:\<name>`.
 
 **Local folder or drive:**
 
@@ -45,8 +45,8 @@ drive (Settings → Resources → File sharing, if it asks).
 
 ```yaml
 volumes:
-  - "I:/x264:/sources/films/films-1:ro"        # -> K:\films\films-1
-  - "F:/Movies 2:/sources/films/films-2:ro"    # -> K:\films\films-2
+  - "I:/x264:/sources/films/films-1:ro"        # -> Y:\films\films-1
+  - "F:/Movies 2:/sources/films/films-2:ro"    # -> Y:\films\films-2
 ```
 
 **Several folders merged into one:** give them the same name followed by `@` and any
@@ -55,7 +55,7 @@ label. Their contents appear together in one folder:
 ```yaml
 volumes:
   - "E:/tv:/sources/tv@e:ro"
-  - "F:/tv:/sources/tv@f:ro"     # E:\tv + F:\tv -> K:\tv
+  - "F:/tv:/sources/tv@f:ro"     # E:\tv + F:\tv -> Y:\tv
 ```
 
 This works with network shares too (`- nas:/sources/tv@nas:ro`). If the same file or
@@ -107,13 +107,13 @@ with the user and password from `.env` - you should see a folder for each source
 .\windows\install-autostart.ps1
 ```
 
-Both accept `-Drive X:` to use a different letter. `K:` is the default. They log in
+Both accept `-Drive X:` to use a different letter. `Y:` is the default. They log in
 with the user and password from `.env` automatically.
 
 If PowerShell refuses to run the scripts, run this first:
 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
 
-That's it - open `K:\` in Explorer.
+That's it - open `Y:\` in Explorer.
 
 ## Using it from other machines
 
@@ -353,6 +353,10 @@ connect at all. A password in `.env` is still required.
   `docker ps`; the drive recovers on its own once the container is up.
 - **A newly added folder is empty on the drive** - the drive caches folder listings for
   1 minute. Wait a minute and refresh.
+- **"Sorry, there was a problem mounting the file" when opening an ISO** - Windows'
+  built-in ISO mounting only works on local disks and normal Windows shares, not on
+  this drive. Use [WinCDEmu](https://wincdemu.sysprogs.org/) (free) instead: right-click
+  the ISO → *Select drive letter & mount*. 7-Zip and WinRAR can also open ISOs directly.
 - **A source folder is missing** - check `docker logs rar2fs` for its `rar2fs:` line,
   and make sure the path in `docker-compose.yml` exists.
 - **Drive letter already in use** - `mount.ps1` stops with an error; pick another with `-Drive`.
