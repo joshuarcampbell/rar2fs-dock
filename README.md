@@ -77,7 +77,12 @@ volumes:
       o: "username=USER,password=PASS,vers=3.0,ro,uid=0,gid=0"
 ```
 
-### 2. Start the container
+### 2. Set a password
+
+Copy `.env.example` to `.env` and change `WEBDAV_PASS`. The container won't start
+without it. `.env` is gitignored, so the password never gets committed.
+
+### 3. Start the container
 
 From this folder:
 
@@ -85,10 +90,10 @@ From this folder:
 docker compose up -d --build
 ```
 
-Check that it's working by opening <http://localhost:8765> in a browser - you should
-see a folder for each source.
+Check that it's working by opening <http://localhost:8765> in a browser and logging in
+with the user and password from `.env` - you should see a folder for each source.
 
-### 3. Mount the drive
+### 4. Mount the drive
 
 **Try it once (stays mounted while the window is open):**
 
@@ -102,53 +107,227 @@ see a folder for each source.
 .\windows\install-autostart.ps1
 ```
 
-Both accept `-Drive X:` to use a different letter. `K:` is the default.
+Both accept `-Drive X:` to use a different letter. `K:` is the default. They log in
+with the user and password from `.env` automatically.
 
 If PowerShell refuses to run the scripts, run this first:
 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
 
 That's it - open `K:\` in Explorer.
 
-## Using it from other machines (e.g. a Linux Plex server)
+## Using it from other machines
 
-The server is reachable from your network at `http://<this-PC's-IP>:8765`, protected
-by the password in `.env` (copy `.env.example` to create it). Compose won't start
-without one.
-
-**1. Allow it through Windows Firewall** (admin PowerShell, once):
+The server is reachable from your network at `http://<this-PC's-IP>:8765`, using the
+login in `.env`. To use it, allow port 8765 through Windows Firewall (admin
+PowerShell, once):
 
 ```powershell
 New-NetFirewallRule -DisplayName "rar2fs-dock WebDAV" -Direction Inbound -Protocol TCP -LocalPort 8765 -Action Allow -Profile Private
 ```
 
-**2. On the Linux machine**, install rclone and copy the files from `linux/`:
+- **Plex (or anything else) on Linux:** see [Plex on Linux](#plex-on-linux) below.
+- **Another Windows PC:** copy the `windows` folder over, install WinFsp and rclone,
+  and run `.\windows\mount.ps1 -Url http://<this-PC's-IP>:8765 -User <user> -Pass <password>`.
+- **Mac:** Finder → Go → Connect to Server → `http://<this-PC's-IP>:8765`.
+- **Media players** (Kodi, VLC, Infuse): add a WebDAV source with the same address and
+  login.
+
+## Plex on Linux
+
+Plex can't read RAR archives. This guide mounts the rar2fs-dock server's folders on
+your Linux Plex server, so Plex sees the files inside the archives as normal video
+and audio files.
+
+```
+Windows PC                         Linux Plex server
+rar2fs ─► WebDAV :8765  ─network─►  rclone mount ─► /mnt/media/tv    ─► Plex
+                                    rclone mount ─► /mnt/media/films ─► Plex
+```
+
+Each folder from the server is mounted at a path you choose, so you can keep the
+paths your Plex libraries already use.
+
+### Before you start
+
+You'll need:
+
+- rar2fs-dock running on the Windows PC (see [Setup](#setup) above), with
+  a password set in `.env`.
+- The Windows PC's IP address. Run `ipconfig` on it and look for the IPv4 address,
+  e.g. `192.168.1.63`.
+- A Linux server with Plex and systemd, and `sudo` access. The commands below are for
+  Debian/Ubuntu; on other distros, install `rclone` and `fuse3` with your package
+  manager.
+
+**In Plex, turn off automatic trash emptying first:** Settings → Library → *Empty
+trash automatically after every scan*. If the Windows PC is off or restarting while
+Plex scans, Plex sees empty folders. With this setting on, it would remove those items
+and their watch history.
+
+### 1. Open the server to your network (Windows PC)
+
+In `docker-compose.yml`, the port line must be `"8765:8080"`, not
+`"127.0.0.1:8765:8080"`. Then allow the port through Windows Firewall from an
+**admin** PowerShell:
+
+```powershell
+New-NetFirewallRule -DisplayName "rar2fs-dock WebDAV" -Direction Inbound -Protocol TCP -LocalPort 8765 -Action Allow -Profile Private
+```
+
+Test from the Linux server. It should print `401`, which means it reached the server
+and was asked for a password:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' http://<windows-pc-ip>:8765/
+```
+
+If it hangs or says `000`, the firewall rule isn't working or the IP is wrong.
+
+### 2. Install rclone (Linux server)
 
 ```bash
 sudo apt install rclone fuse3
+```
+
+### 3. Install the mount service
+
+Copy this repo's `linux/` folder to the server (or clone the repo there), then:
+
+```bash
+cd linux
 sudo mkdir -p /etc/rar2fs/mounts
 sudo cp rar2fs@.service /etc/systemd/system/
-sudo cp common.conf /etc/rar2fs/ && sudo chmod 600 /etc/rar2fs/common.conf
-sudo cp mounts/*.conf /etc/rar2fs/mounts/
 sudo systemctl daemon-reload
 ```
 
-`common.conf` holds the server address and login. It's gitignored; create it from
-`common.conf.example` (the password must be the output of `rclone obscure`).
+`rar2fs@.service` is a template. One copy runs per folder you mount, each reading its
+own small config file.
 
-**3. One mount per folder.** Each file in `mounts/` says which server folder goes
-where:
+### 4. Add the server's address and login
 
-```ini
-REMOTE=films
-MOUNTPOINT=/mnt/media/films
+Create `/etc/rar2fs/common.conf`:
+
+```bash
+sudo cp common.conf.example /etc/rar2fs/common.conf
+sudo chmod 600 /etc/rar2fs/common.conf
+sudo nano /etc/rar2fs/common.conf
 ```
 
-Start one with `sudo systemctl enable --now rar2fs@<file name without .conf>`.
+Fill it in with the Windows PC's IP and the `WEBDAV_USER` / `WEBDAV_PASS` from its
+`.env` file:
 
-If a path was previously an SMB/CIFS mount, unmount it and comment out its
-`/etc/fstab` line first. In Plex, turn off *Settings → Library → Empty trash
-automatically after every scan* - if this PC is off during a scan, Plex would
-otherwise see empty folders and drop those items.
+```ini
+RCLONE_WEBDAV_URL=http://192.168.1.63:8765
+RCLONE_WEBDAV_USER=rar2fs
+RCLONE_WEBDAV_PASS=<see below>
+```
+
+rclone needs the password in its own "obscured" form. Generate it with:
+
+```bash
+rclone obscure 'your-password-here'
+```
+
+and paste the output as `RCLONE_WEBDAV_PASS`. (Obscured isn't encrypted - it just
+keeps the password from being readable at a glance. That's why the file is
+`chmod 600`.)
+
+### 5. Choose where each folder goes
+
+Create one file per folder in `/etc/rar2fs/mounts/`. The file name (without `.conf`)
+is the mount's name.
+
+- `REMOTE` is the folder on the server - the same name you see in the Windows drive,
+  e.g. `tv` or `films/films-1`.
+- `MOUNTPOINT` is where it appears on this server.
+
+For example:
+
+```bash
+printf 'REMOTE=tv\nMOUNTPOINT=/mnt/media/tv\n'       | sudo tee /etc/rar2fs/mounts/tv.conf
+printf 'REMOTE=films\nMOUNTPOINT=/mnt/media/films\n' | sudo tee /etc/rar2fs/mounts/films.conf
+```
+
+To see which folders the server has:
+
+```bash
+sudo bash -c 'set -a; . /etc/rar2fs/common.conf; rclone lsd :webdav:'
+```
+
+The mount point must be an empty folder (it's created if it doesn't exist).
+
+#### Replacing an existing SMB/NFS mount
+
+If Plex already reads these files from a network share, you can mount rar2fs at the
+same path so Plex's library settings don't change. Remove the old mount first:
+
+```bash
+sudo umount /mnt/media/tv
+sudo nano /etc/fstab        # put a # in front of that share's line
+```
+
+Otherwise both will try to use the same folder at boot.
+
+### 6. Start the mounts
+
+```bash
+sudo systemctl enable --now rar2fs@tv rar2fs@films
+```
+
+`enable` makes them start at every boot; they wait for the network and retry on their
+own if the Windows PC isn't up yet.
+
+Check them:
+
+```bash
+findmnt -t fuse.rclone        # each mount should be listed
+ls /mnt/media/tv | head
+```
+
+Folders that held RAR sets should now show the video file (e.g. `.mkv`) instead of
+`.rar` / `.r00` files.
+
+### 7. Point Plex at the folders
+
+- **New paths:** edit the library in Plex (*Manage Library → Edit → Add folders*) and
+  add the mount points.
+- **Same paths as before:** nothing to change.
+
+Then scan the library. The first scan takes longer than on a normal share, because
+Plex reads inside every archive.
+
+Files that Plex already knew keep their metadata and watch history. Video that was
+inside RARs is new to Plex, so it's added as new items.
+
+### Everyday use on Linux
+
+| To... | Run on the Linux server |
+|---|---|
+| See a mount's status | `systemctl status rar2fs@tv` |
+| See its logs | `journalctl -u rar2fs@tv -e` |
+| Pick up changes right away | `sudo systemctl restart rar2fs@tv` |
+| Add a folder | Add a `.conf` file, then `sudo systemctl enable --now rar2fs@<name>` |
+| Remove a folder | `sudo systemctl disable --now rar2fs@<name>`, then delete its `.conf` |
+
+**New or changed folders take up to an hour to show up.** The mounts cache folder
+listings for an hour, to keep Plex scans fast. Restart the mount to see changes
+immediately, e.g. after changing `docker-compose.yml` on the Windows PC. To change the
+cache time, edit `--dir-cache-time` in `/etc/systemd/system/rar2fs@.service` and run
+`sudo systemctl daemon-reload`.
+
+**The Windows PC must stay on.** Docker Desktop only starts after someone logs in to
+Windows, so set the PC to log in automatically, or keep it logged in.
+
+### Troubleshooting on Linux
+
+| Problem | Fix |
+|---|---|
+| `systemctl status` shows `401` or `Unauthorized` | Wrong user/password in `common.conf`. The password must be the `rclone obscure` output, not the plain password. |
+| `connection refused` or timeouts | The Windows PC is off, the container isn't running (`docker ps` on Windows), or the firewall rule is missing. Re-run the `curl` test from step 1. |
+| `directory is not empty` | Something is already in the mount point, often an old share that's still mounted. Check with `findmnt <path>`, unmount it, then restart the mount. |
+| Plex can't see the files | Make sure the service file still has `--allow-other`. Without it, only root can read the mount. |
+| Old folder layout still showing | Cached listing - `sudo systemctl restart rar2fs@<name>`. |
+| Items marked *unavailable* in Plex | The Windows PC was off during a scan. Once it's back, scan again and they return - as long as trash emptying is off. |
 
 ## Everyday use
 
@@ -162,15 +341,11 @@ otherwise see empty folders and drop those items.
 The container restarts on its own with Docker Desktop. For a fully hands-off setup,
 enable Docker Desktop → Settings → General → *Start Docker Desktop when you sign in*.
 
-## Optional: password protection
+## Keeping it to this PC only
 
-The server only listens on `localhost`, so other machines can't reach it. To add a
-password anyway, set `WEBDAV_USER` / `WEBDAV_PASS` in `docker-compose.yml` and pass the
-same values to the scripts:
-
-```powershell
-.\windows\install-autostart.ps1 -User josh -Pass changeme
-```
+If no other device needs it, change the port line in `docker-compose.yml` to
+`"127.0.0.1:8765:8080"` and run `docker compose up -d`. Other machines then can't
+connect at all. A password in `.env` is still required.
 
 ## Troubleshooting
 
@@ -181,7 +356,7 @@ same values to the scripts:
 - **A source folder is missing** - check `docker logs rar2fs` for its `rar2fs:` line,
   and make sure the path in `docker-compose.yml` exists.
 - **Drive letter already in use** - `mount.ps1` stops with an error; pick another with `-Drive`.
-- **Port 8765 already in use** - change the left side of `127.0.0.1:8765:8080` in
+- **Port 8765 already in use** - change the left side of `8765:8080` in
   `docker-compose.yml` and pass the new address with `-Url http://localhost:<port>`.
 
 ## Security
@@ -191,9 +366,11 @@ same values to the scripts:
   folders as writable. To prevent that, nothing in the container runs as root:
   rar2fs, mergerfs and rclone run as an unprivileged user with no capabilities. Only
   the small setuid `fusermount` helpers use `SYS_ADMIN`, and only to create the mounts.
-- **Only this PC can connect.** The server listens on `127.0.0.1`, so other machines on
-  your network can't reach it. Other programs and users on this PC can, unless you set
-  a password (see above).
+- **Password required.** The server is open to your local network, so it always
+  needs the login from `.env`. Compose refuses to start without one. It uses plain
+  HTTP, so don't expose port 8765 to the internet; for access away from home, use a
+  VPN such as Tailscale. To shut out other machines entirely, see *Keeping it to this
+  PC only*.
 - **Pinned downloads.** The unrar and rar2fs source downloads are checked against
   SHA-256 hashes in the `Dockerfile`. Update the hash whenever you change a version.
 - **Keep it updated.** rar2fs uses unrar to read archives, and unrar has had security
