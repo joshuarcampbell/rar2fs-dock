@@ -2,7 +2,7 @@
 # Writes /state/www/status.html - a snapshot of what the container is doing.
 # Rebuilt every minute by `monitor`; served on port 8081 with the same logins as the drive.
 out=/state/www/status.html
-esc() { sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'; }
+esc() { sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g; s/'"'"'/\&#39;/g'; }
 when() { printf '<time data-t="%s"></time>' "$1"; }   # shown in the viewer's local time
 val() { sed -n "s/^$1=//p" /state/versions 2>/dev/null; }
 
@@ -28,7 +28,7 @@ esac
 cat <<HTML
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="60"><title>rar2fs-dock status</title>
+<meta http-equiv="refresh" content="$( [ -f /state/report.running ] && echo 10 || echo 60 )"><title>rar2fs-dock status</title>
 <style>
 :root{--bg:#f6f7f9;--card:#fff;--fg:#1b1f24;--dim:#5c6773;--line:#e1e5ea;--ok:#1a7f37;--bad:#c62828;--wait:#9a6700}
 @media (prefers-color-scheme:dark){:root{--bg:#0f1317;--card:#171c22;--fg:#e6eaef;--dim:#93a0ad;--line:#2a323b;--ok:#4cc26b;--bad:#ff6b6b;--wait:#e3b341}}
@@ -39,6 +39,9 @@ table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:6px 12px
 th{color:var(--dim);font-weight:600;font-size:13px}tr:last-child td{border-bottom:0}td.n{text-align:right;font-variant-numeric:tabular-nums}
 .badge{display:inline-block;padding:2px 10px;border-radius:999px;font-weight:600;font-size:13px;color:#fff}
 .ok{background:var(--ok)}.bad{background:var(--bad)}.wait{background:var(--wait)}
+.run{margin:14px 0 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+select,button{font:inherit;padding:6px 10px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--fg)}
+button{background:var(--ok);border-color:var(--ok);color:#fff;font-weight:600;cursor:pointer}button:disabled{background:var(--dim);border-color:var(--dim);cursor:default}
 .dim{color:var(--dim)}code{font:13px ui-monospace,Consolas,monospace}.none{color:var(--dim);margin:0}
 </style></head><body><main>
 <h1>rar2fs-dock <span class="badge $badge">$label</span></h1>
@@ -72,14 +75,37 @@ done
 c=$(val checked); echo "</table><p class=\"sub\" style=\"margin:10px 0 0\">$( [ -n "$c" ] && printf 'Last checked %s' "$(when "$c")" || echo 'Checked once a day.')</p></section>"
 
 echo '<section><h2>Health report</h2>'
+if [ -f /state/report.running ]; then
+  IFS="$(printf '\t')" read -r started scope < /state/report.running
+  echo "<p><span class=\"badge wait\">running</span> Checking <b>$(printf '%s' "$scope" | esc)</b>, started $(when "$started"). This page updates when it finishes.</p>"
+fi
 if [ -f /state/www/health-report.txt ]; then
-  echo "<p>Last run $(when "$(stat -c %Y /state/www/health-report.txt)") · <a href=\"health-report.txt\">full report</a></p><table>"
+  scope=$(sed -n '1s/^Health report for: //p' /state/www/health-report.txt)
+  echo "<p>Last report: <b>$(printf '%s' "${scope:-everything}" | esc)</b>, finished $(when "$(stat -c %Y /state/www/health-report.txt)") · <a href=\"health-report.txt\">full report</a></p><table>"
   grep '^== ' /state/www/health-report.txt | sed 's/^== //' | while IFS= read -r line; do
     printf '<tr><td>%s</td><td class="n">%s</td></tr>\n' "$(printf '%s' "${line%:*}" | esc)" "${line##*: }"
   done
   echo '</table>'
-elif [ -f /state/report.running ]; then echo '<p class="none">Running now…</p>'
-else echo "<p class=\"none\">Not run yet. Runs every ${HEALTH_REPORT_DAYS:-7} days, or on demand: <code>docker exec rar2fs health-report</code></p>"; fi
+elif [ ! -f /state/report.running ]; then
+  echo '<p class="none">No report yet.</p>'
+fi
+# the button: everything, a folder, or one of the sub-folders a folder is made of
+echo '<form method="post" action="run-report" class="run"><label for="folder">Check</label> <select name="folder" id="folder"><option value="">Everything</option>'
+for d in /view/*/; do
+  [ -d "$d" ] || continue
+  name=$(basename "$d")
+  printf '<option value="%s">%s</option>\n' "$(printf '%s' "$name" | esc)" "$(printf '%s' "$name" | esc)"
+  awk -v a="/sources/$name/" 'index($5, a) == 1 { s = substr($5, length(a) + 1); if (s !~ /\//) print s }' /proc/self/mountinfo | sort -u |
+    while IFS= read -r sub; do
+      printf '<option value="%s">&nbsp;&nbsp;%s</option>\n' "$(printf '%s/%s' "$name" "$sub" | esc)" "$(printf '%s/%s' "$name" "$sub" | esc)"
+    done
+done
+if [ -f /state/report.running ]; then
+  echo '</select> <button type="submit" disabled>Report running…</button></form>'
+else
+  echo '</select> <button type="submit">Run health report</button></form>'
+fi
+echo "<p class=\"sub\" style=\"margin:10px 0 0\">A full report also runs by itself every ${HEALTH_REPORT_DAYS:-7} days. Checking everything can take a while; a single folder is much quicker.</p>"
 echo '</section>'
 
 echo '<section><h2>Recent events</h2>'

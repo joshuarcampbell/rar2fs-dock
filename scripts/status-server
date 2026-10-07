@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+"""Serves the status page on port 8081 and starts a health report when asked.
+
+  GET  /status.html, /health-report.txt ...   files from /state/www
+  POST /run-report  (form field: folder)      starts `run-health-report [folder]`
+
+Every request needs a login from the same list as the drive (/tmp/htpasswd).
+With TLS=1 it serves HTTPS using /tls/cert.pem and /tls/key.pem.
+"""
+import base64
+import hashlib
+import os
+import re
+import ssl
+import subprocess
+import threading
+import time
+import urllib.parse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+WWW = '/state/www'
+HTPASSWD = '/tmp/htpasswd'
+VIEW = '/view'
+TYPES = {'.html': 'text/html; charset=utf-8', '.txt': 'text/plain; charset=utf-8',
+         '.json': 'application/json', '.css': 'text/css'}
+FOLDER_OK = re.compile(r'^[^\x00-\x1f\\]{1,300}$')
+
+_good = {}                  # sha256 of an accepted Authorization header -> expiry time
+_good_lock = threading.Lock()
+# Password guessing is slowed down rather than locked out: at most two checks run at
+# once and every wrong one costs a second, so guessing is capped at about two a second
+# however many connections are opened. (A lock-out would let anyone on the network
+# shut the owner out, and behind Docker all clients can look like one address.)
+_checks = threading.BoundedSemaphore(2)
+WRONG_LOGIN_DELAY = 1.0
+
+
+def login_ok(header):
+    """True if the Basic-auth header matches a login in the htpasswd file."""
+    if not header or not header.startswith('Basic '):
+        return False
+    key = hashlib.sha256(header.encode()).hexdigest()
+    now = time.monotonic()
+    with _good_lock:
+        if _good.get(key, 0) > now:
+            return True
+    try:
+        user, _, password = base64.b64decode(header[6:]).decode('utf-8').partition(':')
+    except Exception:
+        return False
+    if not user or ':' in user or '\n' in user:
+        return False
+    # htpasswd checks the bcrypt hash; the password goes in on stdin, not the command line
+    with _checks:
+        try:
+            result = subprocess.run(['htpasswd', '-v', '-i', HTPASSWD, user], input=password.encode(),
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+            ok = result.returncode == 0
+        except Exception:
+            ok = False
+        if not ok:
+            time.sleep(WRONG_LOGIN_DELAY)
+    if not ok:
+        return False
+    with _good_lock:
+        if len(_good) > 100:
+            _good.clear()
+        _good[key] = now + 600
+    return True
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = 'rar2fs-dock'
+    sys_version = ''        # don't announce the Python version
+    timeout = 30            # drop connections that go quiet
+
+    def log_message(self, fmt, *args):
+        pass                # keep `docker logs` for things that matter
+
+    def _send(self, code, body=b'', content_type='text/plain; charset=utf-8', headers=()):
+        self.send_response(code)
+        self.send_header('Content-Type', content_type)
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('X-Frame-Options', 'DENY')
+        self.send_header('Referrer-Policy', 'same-origin')
+        # the page is self-contained: nothing may be loaded from, or sent to, anywhere else
+        self.send_header('Content-Security-Policy',
+                         "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
+                         "form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+        for name, value in headers:
+            self.send_header(name, value)
+        self.end_headers()
+        if self.command != 'HEAD':
+            self.wfile.write(body)
+
+    def _authorised(self):
+        if login_ok(self.headers.get('Authorization')):
+            return True
+        self._send(401, b'Login required\n', headers=[('WWW-Authenticate', 'Basic realm="rar2fs-dock"')])
+        return False
+
+    def do_GET(self):
+        if not self._authorised():
+            return
+        path = urllib.parse.urlparse(self.path).path
+        if path in ('', '/'):
+            return self._send(302, headers=[('Location', 'status.html')])
+        name = os.path.basename(path)       # only files directly in WWW are served
+        full = os.path.join(WWW, name)
+        if path != '/' + name or name.startswith('.') or not os.path.isfile(full):
+            return self._send(404, b'Not found\n')
+        with open(full, 'rb') as f:
+            body = f.read()
+        self._send(200, body, TYPES.get(os.path.splitext(name)[1], 'application/octet-stream'))
+
+    do_HEAD = do_GET
+
+    def do_POST(self):
+        if not self._authorised():
+            return
+        if urllib.parse.urlparse(self.path).path != '/run-report':
+            return self._send(404, b'Not found\n')
+        # The browser sends the login by itself, so make sure the request was made
+        # from this page and not by some other site the user happens to have open.
+        origin = self.headers.get('Origin') or self.headers.get('Referer') or ''
+        if urllib.parse.urlparse(origin).netloc != self.headers.get('Host', ''):
+            return self._send(403, b'This action can only be started from the status page.\n')
+        length = min(int(self.headers.get('Content-Length') or 0), 4096)
+        form = urllib.parse.parse_qs(self.rfile.read(length).decode('utf-8', 'replace'))
+        folder = (form.get('folder') or [''])[0].strip().strip('/')
+        if folder:
+            real = os.path.realpath(os.path.join(VIEW, folder))
+            if not FOLDER_OK.match(folder) or not (real + '/').startswith(VIEW + '/') or not os.path.isdir(real):
+                return self._send(400, b'Unknown folder.\n')
+        # start it detached, so it keeps running whatever happens to this request
+        command = ['sh', '-c', 'run-health-report "$@" > /dev/null 2>&1 &', 'run-health-report']
+        if folder:
+            command.append(folder)
+        subprocess.run(command, timeout=10)
+        time.sleep(0.5)     # give it a moment to mark itself as running
+        self._send(303, headers=[('Location', 'status.html')])
+
+
+def main():
+    server = ThreadingHTTPServer(('0.0.0.0', 8081), Handler)
+    server.daemon_threads = True
+    if os.environ.get('TLS', '0') == '1':
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.load_cert_chain('/tls/cert.pem', '/tls/key.pem')
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+    server.serve_forever()
+
+
+if __name__ == '__main__':
+    main()

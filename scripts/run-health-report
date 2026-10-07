@@ -1,0 +1,47 @@
+#!/bin/sh
+# Runs the health report once and publishes the result on the status page.
+# Used by the weekly schedule (monitor) and by the button on the status page.
+#
+#   run-health-report [--notify] [folder]
+#
+#   --notify   send a notification if a full report finds problems it hasn't seen before
+#   folder     check only this folder, e.g. tv/tv-1 (default: everything)
+#
+# Only one report runs at a time.
+
+notify_new=0
+[ "$1" = "--notify" ] && { notify_new=1; shift; }
+folder=${1%/}
+lock=/state/report.running
+mkdir -p /state/www
+
+# take the lock, or stop if a report is already running
+if ! ( set -C; printf '%s\t%s\n' "$(date +%s)" "${folder:-everything}" > "$lock" ) 2>/dev/null; then
+  echo "a health report is already running"
+  exit 1
+fi
+trap 'rm -f "$lock" /state/report.tmp' EXIT
+status-page 2>/dev/null     # show "running" on the page straight away
+
+{
+  echo "Health report for: ${folder:-everything}"
+  echo
+  if [ -n "$folder" ]; then nice -n 19 health-report "$folder"; else nice -n 19 health-report; fi
+} > /state/report.tmp 2>&1
+
+if [ -z "$folder" ]; then
+  # a full report: remember when, and work out which problems are new
+  grep '^  ' /state/report.tmp | sort > /state/report.problems.new
+  new=$(LC_ALL=C comm -13 /state/report.problems /state/report.problems.new 2>/dev/null || cat /state/report.problems.new)
+  mv /state/report.problems.new /state/report.problems
+  date +%s > /state/report.full
+  if [ "$notify_new" = 1 ] && [ -n "$new" ]; then
+    notify "Health report: $(printf '%s\n' "$new" | wc -l) new problem(s)" "$(printf '%s\n' "$new" | head -10 | sed 's/^  //')
+Full report: the status page, or docker exec rar2fs cat /state/www/health-report.txt"
+  fi
+fi
+
+mv /state/report.tmp /state/www/health-report.txt
+rm -f "$lock"
+trap - EXIT
+status-page 2>/dev/null

@@ -383,6 +383,11 @@ comes from and whether it's mounted, the unrar/rar2fs versions and whether newer
 exist, the last health report, and recent events (restarts, Plex scans, alerts). It
 refreshes every minute.
 
+The **Run health report** button starts a [health report](#health-report) without
+opening a terminal. Choose *Everything* or a single folder first - one folder is much
+quicker. The page shows *running* while it works and updates by itself when the result
+is in. Only one report runs at a time.
+
 ### Automatic restart
 
 If the health check fails three times in a row, the container restarts itself, which
@@ -499,10 +504,14 @@ docker exec rar2fs health-report              # everything (can take a while)
 docker exec rar2fs health-report tv/tv-1      # one folder
 ```
 
-It also runs by itself every `HEALTH_REPORT_DAYS` days (7 by default; `"0"` in
-`docker-compose.yml` turns that off), starting about an hour after the container is
-first created. The latest result is on the status page, and new problems are sent as a
-notification if you've set that up.
+You can also start it from the **Run health report** button on the
+[status page](#status-page).
+
+A full report also runs by itself every `HEALTH_REPORT_DAYS` days (7 by default; `"0"`
+in `docker-compose.yml` turns that off), starting about an hour after the container is
+first created. A full report you start yourself counts, so the schedule runs from the
+most recent one. The latest result is on the status page, and new problems found by a
+scheduled report are sent as a notification if you've set that up.
 
 A set that is only missing its *last* parts can't be spotted from file names, so it
 won't be listed.
@@ -591,6 +600,8 @@ is still required.
   folders as writable. To prevent that, nothing in the container runs as root:
   rar2fs, mergerfs and rclone run as an unprivileged user with no capabilities. Only
   the small setuid `fusermount` helpers use `SYS_ADMIN`, and only to create the mounts.
+  Every other program in the image that could raise its own privileges (`su`,
+  `passwd`, `mount` and so on) has that ability removed.
 - **Password required.** The server is open to your local network, so it always
   needs the login from `.env`. Compose refuses to start without one. By default it
   uses plain HTTP, which is fine on a home network; see [HTTPS](#https) to encrypt it.
@@ -598,7 +609,12 @@ is still required.
   a VPN such as Tailscale. To shut out other machines entirely, see *Keeping it to
   this PC only*.
 - **The status page uses the same logins** as the drive, on port 8766. It shows your
-  folder names and source paths, so it's password-protected too.
+  folder names and source paths, so it's password-protected too. Wrong passwords are
+  slowed to about two guesses a second, its one action (starting a health report) is
+  only accepted from the page itself, and it can't be embedded in another site.
+- **Use a long password.** The drive's own server (port 8765) doesn't slow down
+  password guessing, so the password is what protects it. `change-me` in
+  `.env.example` is a placeholder - replace it with something long and random.
 - **Pinned downloads.** The unrar and rar2fs source downloads are checked against
   SHA-256 hashes in the `Dockerfile`. Update the hash whenever you change a version.
 - **Keep it updated.** rar2fs uses unrar to read archives, and unrar has had security

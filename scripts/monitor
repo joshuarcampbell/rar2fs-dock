@@ -12,6 +12,8 @@ REPORT_DAYS=${HEALTH_REPORT_DAYS:-7}
 mkdir -p /state/www
 export LC_ALL=C
 rm -f /state/report.running
+# upgrading from a version that timed the schedule by the report file itself
+[ -f /state/report.full ] || { [ -f /state/www/health-report.txt ] && touch -r /state/www/health-report.txt /state/report.full; }
 now() { date +%s; }
 age() { [ -f "$1" ] && echo $(( $(now) - $(stat -c %Y "$1") )) || echo 999999999; }
 
@@ -59,23 +61,12 @@ while sleep "$INTERVAL"; do
     fi
   fi
 
-  # ---- every REPORT_DAYS: health report, in the background ----
+  # ---- every REPORT_DAYS: a full health report, in the background ----
+  # (timed from the last full report; one started from the status page counts too)
   if [ "$REPORT_DAYS" -gt 0 ] && [ ! -f /state/report.running ] \
-     && [ "$(age /state/www/health-report.txt)" -gt $((REPORT_DAYS * 86400)) ] \
+     && [ "$(age /state/report.full)" -gt $((REPORT_DAYS * 86400)) ] \
      && [ $(( $(now) - $(cat /state/started) )) -gt "${HEALTH_REPORT_DELAY:-3600}" ]; then
-    (
-      touch /state/report.running
-      nice -n 19 health-report > /state/report.tmp 2>&1
-      grep '^  ' /state/report.tmp | sort > /state/report.problems.new
-      new=$(comm -13 /state/report.problems /state/report.problems.new 2>/dev/null || cat /state/report.problems.new)
-      mv /state/report.problems.new /state/report.problems
-      mv /state/report.tmp /state/www/health-report.txt
-      if [ -n "$new" ]; then
-        notify "Health report: $(printf '%s\n' "$new" | wc -l) new problem(s)" "$(printf '%s\n' "$new" | head -10 | sed 's/^  //')
-Full report: docker exec rar2fs cat /state/www/health-report.txt"
-      fi
-      rm -f /state/report.running
-    ) &
+    run-health-report --notify > /dev/null 2>&1 &
   fi
 
   status-page 2>/dev/null

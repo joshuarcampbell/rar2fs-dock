@@ -5,7 +5,7 @@
 #      /view/<name>, e.g. /sources/tv@e + /sources/tv@f -> /view/tv.
 #   2. Builds the login list (.env login + config/users.htpasswd).
 #   3. Works out which files to hide (HIDE) and whether to use HTTPS (TLS).
-#   4. Starts the helpers in the background: status page server (:8081),
+#   4. Starts the helpers in the background: status-server (:8081, the status page),
 #      monitor (health, auto-restart, update check, scheduled health report)
 #      and, if configured, plex-refresh.
 #   5. Serves /view read-only over WebDAV (:8080) as the main process.
@@ -96,8 +96,7 @@ fi
 # ---- status page (port 8081) and the watchdog that keeps it fresh ----
 mkdir -p /state/www
 status-page 2>/dev/null || true
-if [ "${TLS:-0}" = "1" ]; then tls_flags="--cert /tls/cert.pem --key /tls/key.pem"; else tls_flags=""; fi
-rclone serve http /state/www --addr :8081 --read-only --htpasswd "$HTPASSWD" $tls_flags &
+status-server &
 monitor &
 
 # ---- optional: tell Plex to scan folders as soon as they change ----
