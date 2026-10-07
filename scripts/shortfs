@@ -235,14 +235,38 @@ class ShortFS(Operations):
             'f_bavail', 'f_bfree', 'f_blocks', 'f_bsize', 'f_favail', 'f_ffree', 'f_files', 'f_frsize', 'f_namemax')}
 
 
+def shown_path(fs, real_rel):
+    """How a real path (relative to the source) is named in the view."""
+    real = fs.root
+    shown = ''
+    for part in real_rel.strip('/').split('/'):
+        if not part:
+            continue
+        try:
+            table = fs._table(shown or '/', real)
+        except OSError:
+            table = {}
+        name = next((s for s, r in table.items() if r == part), part)
+        real = real + '/' + part
+        shown = shown + '/' + name
+    return shown.lstrip('/')
+
+
 def main():
     parser = argparse.ArgumentParser(description='Read-only view with shortened paths.')
     parser.add_argument('source')
-    parser.add_argument('mountpoint')
+    parser.add_argument('mountpoint', nargs='?')
     parser.add_argument('--max-path', type=int, default=230)
+    parser.add_argument('--show', metavar='PATH',
+                        help='print how PATH (relative to source) is named in the view, then exit')
     args = parser.parse_args()
     if args.max_path < RESERVE + 2 * MIN_NAME:
         parser.error('--max-path must be at least %d' % (RESERVE + 2 * MIN_NAME))
+    if args.show is not None:
+        print(shown_path(ShortFS(args.source, args.max_path), args.show))
+        return
+    if not args.mountpoint:
+        parser.error('mountpoint is required')
     FUSE(ShortFS(args.source, args.max_path), args.mountpoint, foreground=True, ro=True,
          allow_other=True, entry_timeout=TTL, attr_timeout=TTL, negative_timeout=2)
 

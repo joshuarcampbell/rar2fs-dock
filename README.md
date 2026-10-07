@@ -179,11 +179,10 @@ Things to know:
   account, it won't see the drive letter.
 - **Docker Desktop has to be running.** Turn on Docker Desktop → Settings → General →
   *Start Docker Desktop when you sign in*.
-- **New files appear at Plex's next scan.** Use *Scan Library Files*, or turn on
-  Settings → Library → *Scan my library periodically*. Plex can't detect changes on
-  this drive by itself, and the automatic trigger described under
-  [Telling Plex about new files straight away](#telling-plex-about-new-files-straight-away)
-  only supports Plex on Linux for now.
+- **New files appear at Plex's next scan.** Plex can't detect changes on this drive
+  by itself. Either use *Scan Library Files* / Settings → Library → *Scan my library
+  periodically*, or let the container tell Plex the moment something changes - see
+  [Telling Plex about new files straight away](#telling-plex-about-new-files-straight-away).
 - **Video inside RARs is new to Plex.** Files Plex already knew keep their metadata;
   video it couldn't read before is added as new items.
 
@@ -496,16 +495,35 @@ Plex can't detect changes on a network mount by itself, so new files normally wa
 its next scheduled scan. Set these in `.env` and the container will watch your source
 folders and ask Plex to scan just the folder that changed:
 
+**Plex on Linux** (another machine):
+
 ```ini
 PLEX_URL=http://192.168.1.50:32400
 PLEX_TOKEN=xxxxxxxxxxxxxxxxxxxx
 PLEX_PATH_MAP=tv=/mnt/media/tv;films=/mnt/media/films
 ```
 
+**Plex on this Windows PC** (`Y:` being the rar2fs drive):
+
+```ini
+PLEX_URL=http://host.docker.internal:32400
+PLEX_TOKEN=xxxxxxxxxxxxxxxxxxxx
+PLEX_PATH_MAP=tv=Y:\tv;films=Y:\films
+```
+
+Then run `docker compose up -d`.
+
+- `PLEX_URL`: where Plex answers. `host.docker.internal` is how the container reaches
+  the PC it runs on; don't use `localhost` here.
 - `PLEX_TOKEN`: in Plex Web, open any item → **⋯** → *Get Info* → *View XML*. The
   token is the `X-Plex-Token=...` value at the end of the address bar.
 - `PLEX_PATH_MAP`: where each folder is mounted on the Plex server, as
-  `<folder on the drive>=<path on the Plex server>`.
+  `<folder on the drive>=<path on the Plex server>`, separated by `;`. Use the same
+  paths your Plex libraries use. **Don't put quotes around it** - inside quotes, `\t`
+  in `Y:\tv` is read as a tab. `Y:/tv` works too.
+- **With `SHORT_PATHS=1`,** Plex on Windows sees shortened folder names, and the
+  container asks for those automatically. If you mounted the drive with `-Original`,
+  add `PLEX_SHORT_NAMES=0` to `.env` so it asks for the full names instead.
 
 It checks once a minute and waits until a folder has stopped changing, so a new
 download reaches Plex about 2-3 minutes after it finishes. `docker logs rar2fs` shows

@@ -30,6 +30,8 @@ services:
       PLEX_URL: ${PLEX_URL:-}
       PLEX_TOKEN: ${PLEX_TOKEN:-}
       PLEX_PATH_MAP: ${PLEX_PATH_MAP:-}
+      # Whether Plex sees the short-names view: auto, 1 or 0 (see README).
+      PLEX_SHORT_NAMES: ${PLEX_SHORT_NAMES:-auto}
       # Optional: a second view of the drive, on port 8767, where paths that are too
       # long for Windows are shortened. Set SHORT_PATHS=1 in .env (see README).
       SHORT_PATHS: ${SHORT_PATHS:-0}
