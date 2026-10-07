@@ -15,8 +15,10 @@ Plex server, for instance - can mount the same view.
 ```
 
 **Contents:** [What you need](#what-you-need) · [Setup](#setup) ·
-[Other machines](#using-it-from-other-machines) · [Plex on Linux](#plex-on-linux) ·
-[Everyday use](#everyday-use) · [Extras](#extras) · [Troubleshooting](#troubleshooting) ·
+[Other machines](#using-it-from-other-machines) ·
+[Plex on this PC](#plex-on-the-same-windows-pc) · [Plex on Linux](#plex-on-linux) ·
+[Everyday use](#everyday-use) · [Extras](#extras) · [Settings](#settings) ·
+[This PC only](#keeping-it-to-this-pc-only) · [Troubleshooting](#troubleshooting) ·
 [Security](#security) · [Why this design](#why-this-design)
 
 ## What you need
@@ -37,8 +39,9 @@ Edit `docker-compose.yml`. Every volume mounted at `/sources/<name>` shows up as
 `Y:\<name>`.
 
 **The file comes with the author's own folders in it** (`F:/tv`, `H:/Games` and so
-on) under `volumes:`. Delete those lines and add your own. Keep the
-`./config:/config:ro` line.
+on) under `volumes:`. Delete those lines and add your own. Keep the three lines
+above them - `./config:/config:ro`, `state:/state` and `./tls:/tls` - which the
+container needs for logins, the status page and HTTPS.
 
 **Local folder or drive:**
 
@@ -72,25 +75,31 @@ This works with network shares too (`- nas-tv:/sources/tv@nas:ro`). If the same 
 folder exists in more than one source, the folders' contents are combined, and for a
 file, the first source alphabetically by label wins.
 
-**Network share (SMB/CIFS):** add one entry per NAS folder at the bottom of
-`docker-compose.yml` (at the left margin, not inside `services:`), then mount it like
-any other source - it can go anywhere, including inside a subfolder group:
+**Network share (SMB/CIFS):** Docker can't see drive letters that Windows has mapped
+to a NAS, so a share is connected by its network address instead. Three steps, all in
+`docker-compose.yml`:
 
-```yaml
-    volumes:
-      - nas-tv:/sources/tv/tv-3:ro          # -> Y:\tv\tv-3
+1. Near the bottom, remove the `#` from the three `x-nas-options` lines. They hold
+   the settings every share uses.
+2. Under the `volumes:` line at the very bottom (the one at the left margin, which
+   already lists `state:`), add one entry per NAS folder:
+   ```yaml
+   volumes:
+     state:
+     nas-tv:
+       driver_opts:
+         <<: *nas-options
+         device: "//nas.example.com/share/TV"  # point straight at the folder you want
+   ```
+3. Mount it with your other folders, like any other source. It can go anywhere,
+   including inside a subfolder group:
+   ```yaml
+         - nas-tv:/sources/tv/tv-3:ro          # -> Y:\tv\tv-3
+   ```
 
-volumes:
-  nas-tv:
-    driver_opts:
-      <<: *nas-options
-      device: "//nas.example.com/share/TV"  # point straight at the folder you want
-```
-
-`*nas-options` (defined just above `volumes:`) holds the shared settings; the login
-comes from `NAS_USER` / `NAS_PASS` in `.env`. After changing a share's `device`, run
-`docker compose down` then `docker compose up -d` - Docker keeps a volume's old
-settings until it's recreated.
+The login comes from `NAS_USER` / `NAS_PASS` in `.env`. After changing a share's
+`device`, run `docker compose down` then `docker compose up -d` - Docker keeps a
+volume's old settings until it's recreated.
 
 ### 2. Set a password
 
@@ -156,9 +165,8 @@ they'll use, separated by commas, then run `docker compose up -d`:
 TLS_HOSTS=192.168.1.63
 ```
 
-**2. Allow ports 8765 (the drive), 8766 (the status page) and 8767 (the short-names
-view)** through Windows
-Firewall (admin PowerShell):
+**2. Allow the ports through Windows Firewall** (admin PowerShell). 8765 is the drive,
+8766 the status page and 8767 the short-names view:
 
 ```powershell
 New-NetFirewallRule -DisplayName "rar2fs-dock" -Direction Inbound -Protocol TCP -LocalPort 8765-8767 -Action Allow -Profile Private
@@ -230,7 +238,9 @@ You'll need:
 - rar2fs-dock running on the Windows PC (see [Setup](#setup) above), with
   a password set in `.env`.
 - The Windows PC's IP address. Run `ipconfig` on it and look for the IPv4 address,
-  e.g. `192.168.1.63`.
+  e.g. `192.168.1.63`. Put it in `.env` as `TLS_HOSTS` (see
+  [Using it from other machines](#using-it-from-other-machines)), so the certificate
+  covers it.
 - A Linux server with Plex and systemd, and `sudo` access. The commands below are for
   Debian/Ubuntu; on other distros, install `rclone` and `fuse3` with your package
   manager.
@@ -250,8 +260,11 @@ cd linux
 sudo sh install.sh
 ```
 
-It installs rclone if needed, asks for the server's address and login, lists the
-folders the server has, and asks where each one should be mounted. It won't mount
+It installs rclone if needed and asks for the server's address
+(`https://<windows-pc-ip>:8765`) and login. It then downloads the server's certificate
+and shows its fingerprint, which you compare with the `tls:` line in
+`docker logs rar2fs` on the Windows PC. After that it lists the folders the server
+has and asks where each one should be mounted. It won't mount
 over a folder that's in use - it tells you what to unmount first - and it never edits
 `/etc/fstab`. Run it again any time to add more folders. Then skip to
 [step 7](#7-point-plex-at-the-folders).
@@ -262,15 +275,11 @@ The steps below do the same thing by hand.
 
 In `docker-compose.yml`, the port line must be `"8765:8080"`, not
 `"127.0.0.1:8765:8080"`. Then allow the ports through Windows Firewall from an
-**admin** PowerShell (8765 is the drive, 8766 the status page):
+**admin** PowerShell (8765 is the drive, 8766 the status page, 8767 the short-names view):
 
 ```powershell
 New-NetFirewallRule -DisplayName "rar2fs-dock" -Direction Inbound -Protocol TCP -LocalPort 8765-8767 -Action Allow -Profile Private
 ```
-
-Also set `TLS_HOSTS` in `.env` to this PC's address (see
-[Using it from other machines](#using-it-from-other-machines)), or the Linux server
-will reject the certificate.
 
 Test from the Linux server. It should print `401`, which means it reached the server
 and was asked for a password (`-k` skips the certificate check for this one test):
@@ -429,6 +438,8 @@ Windows, so set the PC to log in automatically, or keep it logged in.
 | `systemctl status` shows `401` or `Unauthorized` | Wrong user/password in `common.conf`. The password must be the `rclone obscure` output, not the plain password. |
 | `connection refused` or timeouts | The Windows PC is off, the container isn't running (`docker ps` on Windows), or the firewall rule is missing. Re-run the `curl` test from step 1. |
 | `directory is not empty` | Something is already in the mount point, often an old share that's still mounted. Check with `findmnt <path>`, unmount it, then restart the mount. |
+| `x509: certificate ...` errors | The server's certificate doesn't match. Either this PC's address isn't in `TLS_HOSTS` on the Windows PC, or the certificate changed since `/etc/rar2fs/cert.pem` was copied. Fix `TLS_HOSTS` if needed, then run the installer again with `--url https://<windows-pc-ip>:8765` to fetch the current one. |
+| `429 Too Many Requests` | Several wrong passwords were tried in a row, so new logins are refused for a short while. Fix the password in `common.conf`, wait a minute, restart the mount. |
 | Plex can't see the files | Make sure the service file still has `--allow-other`. Without it, only root can read the mount. |
 | Old folder layout still showing | Cached listing - `sudo systemctl restart rar2fs@<name>`. |
 | Items marked *unavailable* in Plex | The Windows PC was off during a scan. Once it's back, scan again and they return - as long as trash emptying is off. |
@@ -438,10 +449,24 @@ Windows, so set the PC to log in automatically, or keep it logged in.
 | To... | Run |
 |---|---|
 | Add or remove a source | Edit `docker-compose.yml`, then `docker compose up -d` |
+| Change a setting | Edit `.env` or `docker-compose.yml` (see [Settings](#settings)), then `docker compose up -d` |
 | See what it's doing | Open <https://localhost:8766/status.html> |
+| Check your folders for problems | The **Run health report** button on that page |
 | See container logs | `docker logs rar2fs` |
 | Stop everything | `docker compose down` |
 | Remove the auto-mount | `.\windows\uninstall-autostart.ps1` |
+| Change the drive letter | `.\windows\uninstall-autostart.ps1`, then `.\windows\install-autostart.ps1 -Drive X:` |
+
+The container answers on three ports, all with the same logins:
+
+| Port | What | Address on this PC |
+|---|---|---|
+| 8765 | The drive | <https://localhost:8765> |
+| 8766 | The status page | <https://localhost:8766/status.html> |
+| 8767 | The drive with [shortened names](#short-names-for-windows), when `SHORT_PATHS=1` | <https://localhost:8767> |
+
+From another device, use this PC's address in place of `localhost`. With `TLS=0` the
+addresses start with `http://`.
 
 The container restarts on its own with Docker Desktop. For a fully hands-off setup,
 enable Docker Desktop → Settings → General → *Start Docker Desktop when you sign in*.
@@ -453,9 +478,9 @@ enable Docker Desktop → Settings → General → *Start Docker Desktop when yo
 <https://localhost:8766/status.html> (or `https://<this-PC's-IP>:8766/status.html` from
 another device), with the same login as the drive. Your browser will warn about the
 self-signed certificate the first time; accept it once. It shows each folder, where it
-comes from and whether it's mounted, the unrar/rar2fs versions and whether newer ones
-exist, the last health report, and recent events (restarts, Plex scans, alerts). It
-refreshes every minute.
+comes from and whether it's mounted or has stopped, the unrar/rar2fs versions and
+whether newer ones exist, the last health report, recent events (restarts, Plex scans,
+alerts) and the current settings. It refreshes every minute.
 
 The **Run health report** button starts a [health report](#health-report) without
 opening a terminal. Choose *Everything* or a single folder first - one folder is much
@@ -464,10 +489,14 @@ is in. Only one report runs at a time.
 
 ### Automatic restart
 
-If the health check fails three times in a row, the container restarts itself, which
-remounts everything. If that happens three times within an hour it stops trying, so a
-problem a restart can't fix (an unplugged drive, say) doesn't turn into a restart loop.
-Set `AUTO_RESTART: "0"` in `docker-compose.yml` to turn it off.
+If the [health check](#health-check) fails three times in a row, the container
+restarts itself, which remounts everything. If that happens three times within an hour
+it stops trying, so a problem a restart can't fix (an unplugged drive, say) doesn't
+turn into a restart loop. Set `AUTO_RESTART: "0"` in `docker-compose.yml` to turn it
+off.
+
+The status page is looked after separately: if it stops answering, only its own small
+server is restarted, so the drive carries on undisturbed.
 
 ### Notifications
 
@@ -475,6 +504,7 @@ The container can message you when something needs attention, so you don't have 
 check the status page. You get a message when:
 
 - the container goes unhealthy, restarts itself, recovers, or gives up restarting
+- the status page had to be restarted
 - a newer unrar or rar2fs release is out (checked daily)
 - the scheduled health report finds **new** problems (every `HEALTH_REPORT_DAYS` days,
   7 by default; problems it has already told you about aren't repeated)
@@ -578,6 +608,7 @@ switch at the same time. Set `TLS_HOSTS`, run `docker compose up -d`, then:
    address.
 
 To put that off, set `TLS=0` for now.
+
 ### Short names for Windows
 
 Many Windows programs fail on paths longer than 260 characters ("path too long", "file
@@ -648,9 +679,11 @@ won't be listed.
 
 ### Health check
 
-Every minute the container checks that each folder is still mounted and the server
-answers. `docker ps` shows `(healthy)` or `(unhealthy)` next to it, and the status
-page shows which check failed. See *Automatic restart* above for what happens next.
+Every minute the container checks that every mount it made still answers - each
+folder, each layer underneath it, and the short-names view if that's on - and that the
+drive's server responds. `docker ps` shows `(healthy)` or `(unhealthy)` next to it,
+and the status page shows which check failed and marks that folder *stopped*. See
+[Automatic restart](#automatic-restart) for what happens next.
 
 ### Archives inside archives (subtitles)
 
@@ -719,12 +752,54 @@ download reaches Plex about 2-3 minutes after it finishes. `docker logs rar2fs` 
 a `plex-refresh:` line for every scan it requests. Leave `PLEX_TOKEN` empty to turn
 this off.
 
+## Settings
+
+Settings live in two files. After changing either, run `docker compose up -d`.
+
+**In `.env`** - yours alone, never committed. Copy `.env.example` to start.
+
+| Setting | What it does | Default |
+|---|---|---|
+| `WEBDAV_USER`, `WEBDAV_PASS` | The login for the drive and the status page. Required. | - |
+| `TLS_HOSTS` | Addresses or names other devices use to reach this PC, for the [HTTPS](#https) certificate | this PC only |
+| `TLS` | `0` turns [HTTPS](#https) off | `1` (on) |
+| `SHORT_PATHS` | `1` turns on the [short-names view](#short-names-for-windows) | `0` (off) |
+| `NOTIFY_URL` | Where to send [notifications](#notifications) | none |
+| `PLEX_URL`, `PLEX_TOKEN`, `PLEX_PATH_MAP` | [Tell Plex about new files](#telling-plex-about-new-files-straight-away) | off |
+| `PLEX_SHORT_NAMES` | Whether Plex reads the short-names view: `auto`, `1` or `0` | `auto` |
+| `NAS_USER`, `NAS_PASS` | Login for network shares, if you use any | - |
+| `APPARMOR_PROFILE` | Linux hosts only - see [Security](#security) | `unconfined` |
+
+**In `docker-compose.yml`**, under `environment:`
+
+| Setting | What it does | Default |
+|---|---|---|
+| `HIDE` | Files and folders to [leave out of the drive](#hiding-clutter) | `.sfv`, samples, recycle bins... |
+| `NESTED_RAR` | Open [archives inside archives](#archives-inside-archives-subtitles) | `"1"` (on) |
+| `MAX_PATH` | Longest path in the short-names view | `"230"` |
+| `AUTO_RESTART` | [Restart](#automatic-restart) after three failed health checks | `"1"` (on) |
+| `HEALTH_REPORT_DAYS` | Days between scheduled [health reports](#health-report); `"0"` = never | `"7"` |
+| `LOGIN_GUESS_LIMIT` | Wrong logins allowed in 10 seconds before new logins are refused for a while | `"5"` |
+| `PLEX_POLL_SECONDS`, `PLEX_SETTLE_SECONDS`, `PLEX_WATCH_DEPTH` | Fine-tuning for the Plex refresh: how often to look, how long to wait after the last change, how many folder levels to watch | `"60"`, `"90"`, `"4"` |
+| `RAR2FS_OPTS` | Options passed to rar2fs. The defaults speed up large multi-part sets and pre-read archives at start-up. | `--seek-length=1 -o warmup` |
+
+Your folders go under `volumes:` in the same file - see
+[Setup, step 1](#1-choose-your-source-folders). The ports are under `ports:`.
+
 ## Keeping it to this PC only
 
-If no other device needs it, put `127.0.0.1:` in front of both port lines in
-`docker-compose.yml` (`"127.0.0.1:8765:8080"` and `"127.0.0.1:8766:8081"`) and run
-`docker compose up -d`. Other machines then can't connect at all. A password in `.env`
-is still required.
+If no other device needs it, put `127.0.0.1:` in front of each of the three port lines
+in `docker-compose.yml`:
+
+```yaml
+    ports:
+      - "127.0.0.1:8765:8080"
+      - "127.0.0.1:8766:8081"
+      - "127.0.0.1:8767:8082"
+```
+
+Then run `docker compose up -d`. Other machines can't connect at all after that, and
+no firewall rule is needed. A password in `.env` is still required.
 
 ## Troubleshooting
 
@@ -739,7 +814,25 @@ is still required.
 - **"Path too long", or a file with a long name won't open** - see
   [Short names for Windows](#short-names-for-windows).
 - **A source folder is missing** - check `docker logs rar2fs` for its `rar2fs:` line,
-  and make sure the path in `docker-compose.yml` exists.
+  and make sure the path in `docker-compose.yml` exists. If the status page shows the
+  folder as *stopped*, the container will restart itself within a few minutes to bring
+  it back; `docker compose restart` does it straight away.
+- **The drive stopped working after changing `TLS`, `TLS_HOSTS` or `SHORT_PATHS`** -
+  the login task remembers how it was set up. Run
+  `.\windows\uninstall-autostart.ps1` and then `.\windows\install-autostart.ps1` so it
+  picks up the new setting.
+- **The browser warns that the connection isn't private** - expected: the container
+  made its own certificate. Choose *Advanced* → *Proceed*. A new warning appears
+  whenever the certificate is recreated, for example after changing `TLS_HOSTS`.
+- **Another device says the certificate is invalid or doesn't match** - the address it
+  connects to isn't in the certificate. Add it to `TLS_HOSTS` in `.env`, run
+  `docker compose up -d`, and give that device the new `tls\cert.pem`.
+- **"429 Too Many Requests"** - several wrong passwords were tried in a short time, so
+  logins that haven't worked before are refused for a while. Devices already
+  connected aren't affected. Check the password and try again after a minute.
+- **The status page times out or won't load** - make sure the address starts with
+  `https://` (or `http://` if you set `TLS=0`) and ends in `/status.html`. If it
+  stops answering, the container restarts it by itself within a couple of minutes.
 - **Drive letter already in use** - `mount.ps1` stops with an error; pick another with `-Drive`.
 - **Port 8765 already in use** - change the left side of `8765:8080` in
   `docker-compose.yml` and pass the new address with `-Url https://localhost:<port>`.
@@ -756,8 +849,9 @@ is still required.
 - **Password required.** The server is open to your local network, so it always
   needs the login from `.env`. Compose refuses to start without one. Traffic is
   encrypted with [HTTPS](#https) unless you turn that off. Either way, don't expose
-  the ports to the internet - for access away from home, use a VPN such as Tailscale. To shut out other machines entirely, see *Keeping it to
-  this PC only*.
+  the ports to the internet - for access away from home, use a VPN such as Tailscale.
+  To shut out other machines entirely, see
+  [Keeping it to this PC only](#keeping-it-to-this-pc-only).
 - **The status page uses the same logins** as the drive, on port 8766. It shows your
   folder names and source paths, so it's password-protected too. Wrong passwords are
   slowed to about two guesses a second, its one action (starting a health report) is
@@ -799,3 +893,8 @@ is still required.
 - Windows' built-in WebDAV client limits files to 4 GB and handles large folders
   poorly, so rclone + WinFsp mounts the drive instead. It has no size limit and
   supports seeking within large files.
+- rclone serves the files but can't slow down password guessing, so a small HAProxy
+  sits in front of it. It also handles HTTPS for the drive.
+- The source folders are stacked in layers inside the container (merge → unpack →
+  unpack again for archives inside archives → optionally shorten names). Each layer is
+  a separate small program, which is why the health check looks at every one.
