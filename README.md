@@ -5,13 +5,19 @@ unpacking, no extra disk space.
 
 [rar2fs](https://github.com/hasse69/rar2fs) runs inside a Docker container and reads
 your local folders and network shares. The extracted view is served to Windows and
-mounted as a normal drive letter (e.g. `Y:`).
+mounted as a normal drive letter (e.g. `Y:`). Other machines on your network - a Linux
+Plex server, for instance - can mount the same view.
 
 ```
  D:\Downloads ─┐                    ┌──────── Docker ────────┐
- \nas\media  ─┼─► /sources/<name> ─► rar2fs ─► WebDAV :8765 ─┼─► rclone + WinFsp ─► Y:\
+ \\nas\media ─┼─► /sources/<name> ─► rar2fs ─► WebDAV :8765 ─┼─► rclone + WinFsp ─► Y:\
                │                    └────────────────────────┘
 ```
+
+**Contents:** [What you need](#what-you-need) · [Setup](#setup) ·
+[Other machines](#using-it-from-other-machines) · [Plex on Linux](#plex-on-linux) ·
+[Everyday use](#everyday-use) · [Extras](#extras) · [Troubleshooting](#troubleshooting) ·
+[Security](#security) · [Why this design](#why-this-design)
 
 ## What you need
 
@@ -58,7 +64,7 @@ volumes:
   - "F:/tv:/sources/tv@f:ro"     # E:\tv + F:\tv -> Y:\tv
 ```
 
-This works with network shares too (`- nas:/sources/tv@nas:ro`). If the same file or
+This works with network shares too (`- nas-tv:/sources/tv@nas:ro`). If the same file or
 folder exists in more than one source, the folders' contents are combined, and for a
 file, the first source alphabetically by label wins.
 
@@ -123,11 +129,11 @@ That's it - open `Y:\` in Explorer.
 ## Using it from other machines
 
 The server is reachable from your network at `http://<this-PC's-IP>:8765`, using the
-login in `.env`. To use it, allow port 8765 through Windows Firewall (admin
-PowerShell, once):
+login in `.env`. To use it, allow ports 8765 (the drive) and 8766 (the status page)
+through Windows Firewall (admin PowerShell, once):
 
 ```powershell
-New-NetFirewallRule -DisplayName "rar2fs-dock WebDAV" -Direction Inbound -Protocol TCP -LocalPort 8765 -Action Allow -Profile Private
+New-NetFirewallRule -DisplayName "rar2fs-dock" -Direction Inbound -Protocol TCP -LocalPort 8765,8766 -Action Allow -Profile Private
 ```
 
 - **Plex (or anything else) on Linux:** see [Plex on Linux](#plex-on-linux) below.
@@ -169,14 +175,32 @@ trash automatically after every scan*. If the Windows PC is off or restarting wh
 Plex scans, Plex sees empty folders. With this setting on, it would remove those items
 and their watch history.
 
+### Quick way: the installer
+
+Copy this repo's `linux/` folder to the server (or clone the repo there), do
+[step 1](#1-open-the-server-to-your-network-windows-pc) on the Windows PC, then run:
+
+```bash
+cd linux
+sudo sh install.sh
+```
+
+It installs rclone if needed, asks for the server's address and login, lists the
+folders the server has, and asks where each one should be mounted. It won't mount
+over a folder that's in use - it tells you what to unmount first - and it never edits
+`/etc/fstab`. Run it again any time to add more folders. Then skip to
+[step 7](#7-point-plex-at-the-folders).
+
+The steps below do the same thing by hand.
+
 ### 1. Open the server to your network (Windows PC)
 
 In `docker-compose.yml`, the port line must be `"8765:8080"`, not
-`"127.0.0.1:8765:8080"`. Then allow the port through Windows Firewall from an
-**admin** PowerShell:
+`"127.0.0.1:8765:8080"`. Then allow the ports through Windows Firewall from an
+**admin** PowerShell (8765 is the drive, 8766 the status page):
 
 ```powershell
-New-NetFirewallRule -DisplayName "rar2fs-dock WebDAV" -Direction Inbound -Protocol TCP -LocalPort 8765 -Action Allow -Profile Private
+New-NetFirewallRule -DisplayName "rar2fs-dock" -Direction Inbound -Protocol TCP -LocalPort 8765,8766 -Action Allow -Profile Private
 ```
 
 Test from the Linux server. It should print `401`, which means it reached the server
@@ -252,6 +276,8 @@ For example:
 printf 'REMOTE=tv\nMOUNTPOINT=/mnt/media/tv\n'       | sudo tee /etc/rar2fs/mounts/tv.conf
 printf 'REMOTE=films\nMOUNTPOINT=/mnt/media/films\n' | sudo tee /etc/rar2fs/mounts/films.conf
 ```
+
+(`linux/mounts/` in this repo has these two files as examples you can copy instead.)
 
 To see which folders the server has:
 
@@ -339,6 +365,7 @@ Windows, so set the PC to log in automatically, or keep it logged in.
 | To... | Run |
 |---|---|
 | Add or remove a source | Edit `docker-compose.yml`, then `docker compose up -d` |
+| See what it's doing | Open <http://localhost:8766/status.html> |
 | See container logs | `docker logs rar2fs` |
 | Stop everything | `docker compose down` |
 | Remove the auto-mount | `.\windows\uninstall-autostart.ps1` |
@@ -347,6 +374,119 @@ The container restarts on its own with Docker Desktop. For a fully hands-off set
 enable Docker Desktop → Settings → General → *Start Docker Desktop when you sign in*.
 
 ## Extras
+
+### Status page
+
+<http://localhost:8766/status.html> (or `http://<this-PC's-IP>:8766/status.html` from
+another device), with the same login as the drive. It shows each folder, where it
+comes from and whether it's mounted, the unrar/rar2fs versions and whether newer ones
+exist, the last health report, and recent events (restarts, Plex scans, alerts). It
+refreshes every minute.
+
+### Automatic restart
+
+If the health check fails three times in a row, the container restarts itself, which
+remounts everything. If that happens three times within an hour it stops trying, so a
+problem a restart can't fix (an unplugged drive, say) doesn't turn into a restart loop.
+Set `AUTO_RESTART: "0"` in `docker-compose.yml` to turn it off.
+
+### Notifications
+
+The container can message you when something needs attention, so you don't have to
+check the status page. You get a message when:
+
+- the container goes unhealthy, restarts itself, recovers, or gives up restarting
+- a newer unrar or rar2fs release is out (checked daily)
+- the scheduled health report finds **new** problems (every `HEALTH_REPORT_DAYS` days,
+  7 by default; problems it has already told you about aren't repeated)
+
+Pick one of the services below, put its address in `.env` as `NOTIFY_URL`, and run
+`docker compose up -d`. Without `NOTIFY_URL`, the same events still appear on the
+status page.
+
+**ntfy - notifications on your phone (simplest)**
+
+1. Install the free **ntfy** app (iOS or Android). No account is needed.
+2. In the app, tap **+** and subscribe to a topic name you make up. Make it long and
+   random, e.g. `rar2fs-8f3k2x9q7` - anyone who knows the name can read the messages.
+3. In `.env`:
+   ```ini
+   NOTIFY_URL=https://ntfy.sh/rar2fs-8f3k2x9q7
+   ```
+
+You can also read the messages in a browser at `https://ntfy.sh/<your-topic>`.
+
+**Discord - messages in a channel**
+
+1. In a server you manage, open the channel's settings → *Integrations* → *Webhooks* →
+   *New Webhook* → *Copy Webhook URL*.
+2. In `.env`:
+   ```ini
+   NOTIFY_URL=https://discord.com/api/webhooks/...
+   ```
+
+**Slack - messages in a channel**
+
+1. Create an *Incoming Webhook* for the channel (Slack → *Apps* → *Incoming Webhooks*)
+   and copy its URL.
+2. In `.env`:
+   ```ini
+   NOTIFY_URL=https://hooks.slack.com/services/...
+   ```
+
+**Test it**
+
+After `docker compose up -d`, send yourself a message:
+
+```powershell
+docker exec rar2fs notify "Test" "Hello from rar2fs-dock"
+```
+
+If the address is wrong or unreachable, the command prints
+`notify: could not deliver to NOTIFY_URL`.
+
+### Updates for unrar and rar2fs
+
+unrar is the part that reads untrusted archives, so it's the one worth keeping
+current. When the status page (or a notification) says a newer version is out:
+
+1. In the `Dockerfile`, change `UNRAR_VERSION` (or `RAR2FS_VERSION`) at the top.
+2. Update the matching `..._SHA256` line. Get the new value with:
+   ```powershell
+   curl.exe -sL https://www.rarlab.com/rar/unrarsrc-<version>.tar.gz | docker run --rm -i debian:bookworm-slim sha256sum
+   ```
+3. `docker compose up -d --build`
+
+The build fails if the hash doesn't match the download, so a typo can't slip through.
+
+### HTTPS
+
+By default the server uses plain HTTP, which is fine on a home network. Turn HTTPS on
+if the server is reached over networks you don't fully trust. **Every device that
+connects has to be updated at the same time**, so plan for a few minutes of downtime.
+
+1. In `.env`, set `TLS=1` and list the names or addresses other devices use to reach
+   this PC:
+   ```ini
+   TLS=1
+   TLS_HOSTS=192.168.1.63
+   ```
+2. `docker compose up -d`. The first start creates a self-signed certificate in `tls\`
+   (gitignored) and prints its fingerprint - see `docker logs rar2fs`.
+3. **This PC:** `.\windows\uninstall-autostart.ps1` then `.\windows\install-autostart.ps1`.
+   The scripts switch to `https://` and trust `tls\cert.pem` automatically.
+4. **Linux machines:** run `sudo sh install.sh --url https://<this-PC's-IP>:8765 --user
+   <user> --pass '<password>'` again. It downloads the certificate, shows its
+   fingerprint to compare with step 2, and updates the settings. Then restart the
+   mounts: `sudo systemctl restart 'rar2fs@*'`.
+5. **Other Windows PCs:** copy `tls\cert.pem` into a `tls` folder next to their
+   `windows` folder, and use `-Url https://<this-PC's-IP>:8765`.
+6. The status page moves to `https://...:8766/status.html`. Browsers will warn about
+   the self-signed certificate; that's expected.
+
+To use your own certificate instead, put it in `tls\cert.pem` and `tls\key.pem` before
+step 2. Changing `TLS_HOSTS` later creates a new certificate, and devices need steps
+3-5 again.
 
 ### Health report
 
@@ -359,15 +499,19 @@ docker exec rar2fs health-report              # everything (can take a while)
 docker exec rar2fs health-report tv/tv-1      # one folder
 ```
 
+It also runs by itself every `HEALTH_REPORT_DAYS` days (7 by default; `"0"` in
+`docker-compose.yml` turns that off), starting about an hour after the container is
+first created. The latest result is on the status page, and new problems are sent as a
+notification if you've set that up.
+
 A set that is only missing its *last* parts can't be spotted from file names, so it
 won't be listed.
 
 ### Health check
 
-Docker checks every minute that each folder is still mounted and the server answers.
-`docker ps` shows `(healthy)` or `(unhealthy)` next to the container. If it's
-unhealthy, `docker compose restart` usually fixes it; `docker inspect rar2fs
---format '{{json .State.Health.Log}}'` shows which check failed.
+Every minute the container checks that each folder is still mounted and the server
+answers. `docker ps` shows `(healthy)` or `(unhealthy)` next to it, and the status
+page shows which check failed. See *Automatic restart* above for what happens next.
 
 ### Archives inside archives (subtitles)
 
@@ -419,9 +563,10 @@ this off.
 
 ## Keeping it to this PC only
 
-If no other device needs it, change the port line in `docker-compose.yml` to
-`"127.0.0.1:8765:8080"` and run `docker compose up -d`. Other machines then can't
-connect at all. A password in `.env` is still required.
+If no other device needs it, put `127.0.0.1:` in front of both port lines in
+`docker-compose.yml` (`"127.0.0.1:8765:8080"` and `"127.0.0.1:8766:8081"`) and run
+`docker compose up -d`. Other machines then can't connect at all. A password in `.env`
+is still required.
 
 ## Troubleshooting
 
@@ -447,15 +592,20 @@ connect at all. A password in `.env` is still required.
   rar2fs, mergerfs and rclone run as an unprivileged user with no capabilities. Only
   the small setuid `fusermount` helpers use `SYS_ADMIN`, and only to create the mounts.
 - **Password required.** The server is open to your local network, so it always
-  needs the login from `.env`. Compose refuses to start without one. It uses plain
-  HTTP, so don't expose port 8765 to the internet; for access away from home, use a
-  VPN such as Tailscale. To shut out other machines entirely, see *Keeping it to this
-  PC only*.
+  needs the login from `.env`. Compose refuses to start without one. By default it
+  uses plain HTTP, which is fine on a home network; see [HTTPS](#https) to encrypt it.
+  Either way, don't expose the ports to the internet - for access away from home, use
+  a VPN such as Tailscale. To shut out other machines entirely, see *Keeping it to
+  this PC only*.
+- **The status page uses the same logins** as the drive, on port 8766. It shows your
+  folder names and source paths, so it's password-protected too.
 - **Pinned downloads.** The unrar and rar2fs source downloads are checked against
   SHA-256 hashes in the `Dockerfile`. Update the hash whenever you change a version.
 - **Keep it updated.** rar2fs uses unrar to read archives, and unrar has had security
-  bugs before. Rebuild now and then with `docker compose build --pull` and
-  `docker compose up -d`, and bump `UNRAR_VERSION` when rarlab releases a new version.
+  bugs before. The container checks daily for newer releases and tells you on the
+  status page (and by notification, if set up); see
+  [Updates for unrar and rar2fs](#updates-for-unrar-and-rar2fs). Rebuilding now and
+  then with `docker compose build --pull` also picks up Debian's own fixes.
 
 ## Why this design
 

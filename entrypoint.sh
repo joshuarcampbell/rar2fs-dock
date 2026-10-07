@@ -1,9 +1,15 @@
 #!/bin/sh
-# Mounts every folder under /sources through rar2fs at /view/<name>,
-# then serves /view read-only over WebDAV.
-#
-# Sources named <name>@<anything> are merged (via mergerfs) into a single
-# /view/<name>, e.g. /sources/tv@e + /sources/tv@f -> /view/tv.
+# Container start-up. In order:
+#   1. Mounts every folder under /sources through rar2fs at /view/<name>.
+#      Sources named <name>@<anything> are first merged (mergerfs) into one
+#      /view/<name>, e.g. /sources/tv@e + /sources/tv@f -> /view/tv.
+#   2. Builds the login list (.env login + config/users.htpasswd).
+#   3. Works out which files to hide (HIDE) and whether to use HTTPS (TLS).
+#   4. Starts the helpers in the background: status page server (:8081),
+#      monitor (health, auto-restart, update check, scheduled health report)
+#      and, if configured, plex-refresh.
+#   5. Serves /view read-only over WebDAV (:8080) as the main process.
+# The helpers live in scripts/ (installed to /usr/local/bin).
 set -e
 
 mounted=""
@@ -62,7 +68,7 @@ fi
 echo "logins: $(cut -d: -f1 "$HTPASSWD" | tr '\n' ' ')"
 
 # ---- hide clutter: HIDE is a ;-separated list of rclone filter patterns ----
-HIDE=${HIDE-*.sfv;Thumbs.db;desktop.ini;.DS_Store;@Recycle/**;.qsyncclient/**;Sample/**;Proof/**}
+export HIDE=${HIDE-*.sfv;Thumbs.db;desktop.ini;.DS_Store;@Recycle/**;.qsyncclient/**;Sample/**;Proof/**}
 set -f
 old_ifs=$IFS; IFS=';'
 set --
@@ -71,6 +77,28 @@ for pattern in $HIDE; do
 done
 IFS=$old_ifs
 set +f
+
+# ---- optional HTTPS: TLS=1 uses /tls/cert.pem + key.pem, creating a self-signed pair if missing ----
+if [ "${TLS:-0}" = "1" ]; then
+  hosts="localhost,127.0.0.1${TLS_HOSTS:+,$TLS_HOSTS}"
+  if [ ! -s /tls/cert.pem ] || [ ! -s /tls/key.pem ] || [ "$(cat /tls/hosts.txt 2>/dev/null)" != "$hosts" ]; then
+    san=$(printf '%s' "$hosts" | tr ',' '
+' | sed 's/^ *//; s/ *$//' | grep . |
+      awk '{ printf "%s%s:%s", (NR > 1 ? "," : ""), ($0 ~ /^[0-9.]+$/ || $0 ~ /:/ ? "IP" : "DNS"), $0 }')
+    openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=rar2fs-dock"       -addext "subjectAltName=$san" -keyout /tls/key.pem -out /tls/cert.pem 2>/dev/null
+    printf '%s' "$hosts" > /tls/hosts.txt
+    echo "tls: created a self-signed certificate for $hosts"
+  fi
+  echo "tls: $(openssl x509 -in /tls/cert.pem -noout -fingerprint -sha256)"
+  set -- "$@" --cert /tls/cert.pem --key /tls/key.pem
+fi
+
+# ---- status page (port 8081) and the watchdog that keeps it fresh ----
+mkdir -p /state/www
+status-page 2>/dev/null || true
+if [ "${TLS:-0}" = "1" ]; then tls_flags="--cert /tls/cert.pem --key /tls/key.pem"; else tls_flags=""; fi
+rclone serve http /state/www --addr :8081 --read-only --htpasswd "$HTPASSWD" $tls_flags &
+monitor &
 
 # ---- optional: tell Plex to scan folders as soon as they change ----
 if [ -n "$PLEX_URL" ] && [ -n "$PLEX_TOKEN" ]; then

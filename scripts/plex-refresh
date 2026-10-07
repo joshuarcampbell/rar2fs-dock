@@ -52,6 +52,7 @@ scan() {  # source path
   [ -n "$key" ] || { log "no Plex library contains $p - skipped"; return; }
   if plex "/library/sections/$key/refresh" -G --data-urlencode "path=$p" > /dev/null; then
     log "asked Plex to scan $p (library $key)"
+    printf '%s\tPlex scan\t%s\n' "$(date +%s)" "$p" >> /state/events.log
   else
     log "Plex scan request failed for $p"
   fi

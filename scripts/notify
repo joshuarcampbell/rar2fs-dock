@@ -1,0 +1,25 @@
+#!/bin/sh
+# Records an event and, if NOTIFY_URL is set, sends it as a notification.
+#   notify "Title" "Message"
+# NOTIFY_URL can be an ntfy topic (https://ntfy.sh/my-topic), a Discord or Slack
+# webhook, or any URL that accepts a plain-text POST.
+title=$1; msg=$2
+mkdir -p /state
+printf '%s\t%s\t%s\n' "$(date +%s)" "$title" "$(printf '%s' "$msg" | tr '\n\t' '  ')" >> /state/events.log
+echo "notify: $title - $(printf '%s' "$msg" | head -1)"
+[ -n "$NOTIFY_URL" ] || exit 0
+
+# The URL goes in a private config file (not the command line), since it can contain a secret.
+cfg=$(mktemp); trap 'rm -f "$cfg"' EXIT
+printf 'url = "%s"\n' "$NOTIFY_URL" > "$cfg"
+send() { curl -fsS -m 15 -o /dev/null -K "$cfg" "$@"; }
+case "$NOTIFY_URL" in
+  *discord.com/api/webhooks*|*discordapp.com/api/webhooks*)
+    jq -n --arg c "**$title**
+$msg" '{content: $c[0:1900]}' | send -H 'Content-Type: application/json' --data-binary @- ;;
+  *hooks.slack.com*)
+    jq -n --arg c "*$title*
+$msg" '{text: $c}' | send -H 'Content-Type: application/json' --data-binary @- ;;
+  *)
+    printf '%s' "$msg" | send -H "Title: rar2fs-dock: $title" -H "Content-Type: text/plain; charset=utf-8" --data-binary @- ;;
+esac || echo "notify: could not deliver to NOTIFY_URL"

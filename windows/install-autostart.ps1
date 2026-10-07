@@ -2,14 +2,15 @@
 # Run once from a normal (non-admin) PowerShell. Re-run to change settings.
 param(
     [string]$Drive = "Y:",
-    [string]$Url = "http://localhost:8765",
+    [string]$Url = "",   # default: chosen by mount.ps1 from ..\.env
     [string]$User = "",
     [string]$Pass = ""
 )
 
 $TaskName = "rar2fs-dock mount"
 $script = Join-Path $PSScriptRoot "mount.ps1"
-$argList = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$script`" -Drive $Drive -Url $Url"
+$argList = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$script`" -Drive $Drive"
+if ($Url) { $argList += " -Url $Url" }
 if ($User) { $argList += " -User `"$User`" -Pass `"$Pass`"" }
 
 $action   = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $argList

@@ -2,7 +2,7 @@
 # Runs in the foreground; close the window (or Ctrl+C) to unmount.
 param(
     [string]$Drive = "Y:",
-    [string]$Url = "http://localhost:8765",
+    [string]$Url = "",   # default: http(s)://localhost:8765, depending on TLS in ..\.env
     [string]$User = "",
     [string]$Pass = ""
 )
@@ -25,14 +25,18 @@ if ($running) {
         "letters, run .\windows\uninstall-autostart.ps1 then .\windows\install-autostart.ps1 -Drive $Drive")
 }
 
-# Without -User/-Pass, use the same credentials as the container (from ..\.env)
+# Settings shared with the container (..\.env): login, and whether HTTPS is on
 $envFile = Join-Path $PSScriptRoot "..\.env"
-if (-not $User -and (Test-Path $envFile)) {
+$envUser = ""; $envPass = ""; $tls = $false
+if (Test-Path $envFile) {
     foreach ($line in Get-Content $envFile) {
-        if ($line -match '^\s*WEBDAV_USER\s*=\s*(.*)$') { $User = $Matches[1].Trim() }
-        if ($line -match '^\s*WEBDAV_PASS\s*=\s*(.*)$') { $Pass = $Matches[1].Trim() }
+        if ($line -match '^\s*WEBDAV_USER\s*=\s*(.*)$') { $envUser = $Matches[1].Trim() }
+        if ($line -match '^\s*WEBDAV_PASS\s*=\s*(.*)$') { $envPass = $Matches[1].Trim() }
+        if ($line -match '^\s*TLS\s*=\s*1\s*$') { $tls = $true }
     }
 }
+if (-not $User) { $User = $envUser; $Pass = $envPass }
+if (-not $Url) { $Url = if ($tls) { "https://localhost:8765" } else { "http://localhost:8765" } }
 
 $rcloneArgs = @(
     "mount", ":webdav:", $Drive,
@@ -44,6 +48,12 @@ $rcloneArgs = @(
     "--dir-cache-time", "1m",
     "--vfs-cache-mode", "off"
 )
+# HTTPS with the container's self-signed certificate: trust exactly that certificate
+$cert = Join-Path $PSScriptRoot "..\tls\cert.pem"
+if ($Url -like "https://*" -and (Test-Path $cert)) {
+    $rcloneArgs += @("--ca-cert", (Resolve-Path $cert).Path)
+}
+
 # Credentials go through env vars so they don't show up in the process list
 if ($User) {
     $env:RCLONE_WEBDAV_USER = $User

@@ -10,9 +10,12 @@ services:
     devices: [/dev/fuse]
     security_opt: [apparmor:unconfined]
     ports:
-      # WebDAV. "8765:8080" is reachable from your network (needs a password in .env);
-      # use "127.0.0.1:8765:8080" to limit it to this PC.
+      # Both are reachable from your network, behind the logins. To limit them to this
+      # PC, put 127.0.0.1: in front of each, e.g. "127.0.0.1:8765:8080".
+      # The drive (WebDAV):
       - "8765:8080"
+      # Status page: http://localhost:8766/status.html
+      - "8766:8081"
     environment:
       # --seek-length=1: only read the first volume's header (faster on big sets)
       # -o warmup: read every archive's header in the background at startup, so
@@ -28,9 +31,27 @@ services:
       PLEX_URL: ${PLEX_URL:-}
       PLEX_TOKEN: ${PLEX_TOKEN:-}
       PLEX_PATH_MAP: ${PLEX_PATH_MAP:-}
+      # Fine-tuning: seconds between checks, seconds to wait after the last change,
+      # and how many folder levels to watch.
+      PLEX_POLL_SECONDS: "60"
+      PLEX_SETTLE_SECONDS: "90"
+      PLEX_WATCH_DEPTH: "4"
+      # Optional: where to send alerts (ntfy topic, Discord or Slack webhook). Set in .env.
+      NOTIFY_URL: ${NOTIFY_URL:-}
+      # Restart automatically after 3 failed health checks in a row. 0 = off.
+      AUTO_RESTART: "1"
+      # Run the health report every N days and alert on new problems. 0 = never.
+      HEALTH_REPORT_DAYS: "7"
+      # Optional HTTPS (set TLS=1 in .env; see README before turning it on).
+      TLS: ${TLS:-0}
+      TLS_HOSTS: ${TLS_HOSTS:-}
     volumes:
       # Extra logins: config/users.htpasswd (see README, "More logins")
       - "./config:/config:ro"
+      # Status, event log and health report survive container rebuilds here
+      - state:/state
+      # HTTPS certificate (only used when TLS=1)
+      - "./tls:/tls"
       # Each folder under /sources/<name> shows up as <drive>:\<name>
       # Format: "<Windows path, forward slashes>:/sources/<name>:ro"
       #
@@ -56,7 +77,7 @@ services:
       - "H:/Games:/sources/games:ro"
       - "H:/New-MP3:/sources/mp3:ro"
       # Network shares (defined at the bottom) work the same way:
-      # -> Y:	v	v-3
+      # -> Y:\tv\tv-3
       #- nas-tv:/sources/tv/tv-3:ro
 
 # Network shares - must start at the left margin, not inside "services:".
@@ -66,7 +87,8 @@ services:
 #  type: cifs
 #  o: "username=${NAS_USER:?set NAS_USER in .env},password=${NAS_PASS:?set NAS_PASS in .env},vers=3.0,iocharset=utf8,ro,uid=1000,gid=1000"
 
-#volumes:
+volumes:
+  state:
 #  nas-tv:
 #    driver_opts:
 #      <<: *nas-options
