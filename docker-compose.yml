@@ -13,6 +13,8 @@ services:
       # WebDAV. "8765:8080" is reachable from your network (needs a password in .env);
       # use "127.0.0.1:8765:8080" to limit it to this PC.
       - "8765:8080"
+      # Short-names view of the drive (only answers when SHORT_PATHS=1)
+      - "8767:8082"
     environment:
       # --seek-length=1: only read the first volume's header (faster on big sets)
       # -o warmup: read every archive's header in the background at startup, so
@@ -28,6 +30,11 @@ services:
       PLEX_URL: ${PLEX_URL:-}
       PLEX_TOKEN: ${PLEX_TOKEN:-}
       PLEX_PATH_MAP: ${PLEX_PATH_MAP:-}
+      # Optional: a second view of the drive, on port 8767, where paths that are too
+      # long for Windows are shortened. Set SHORT_PATHS=1 in .env (see README).
+      SHORT_PATHS: ${SHORT_PATHS:-0}
+      # Longest path allowed in that view, counted from the drive root.
+      MAX_PATH: "230"
     volumes:
       # Extra logins: config/users.htpasswd (see README, "More logins")
       - "./config:/config:ro"

@@ -23,7 +23,7 @@ RUN wget -qO rar2fs.tgz https://github.com/hasse69/rar2fs/archive/refs/tags/v${R
 # ---- runtime ----
 FROM debian:bookworm-slim
 RUN apt-get update \
- && apt-get install -y --no-install-recommends fuse libfuse2 mergerfs rclone ca-certificates tini curl jq apache2-utils \
+ && apt-get install -y --no-install-recommends fuse libfuse2 mergerfs rclone ca-certificates tini curl jq apache2-utils python3 python3-fusepy \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=build /usr/lib/libunrar.so /usr/lib/
 COPY --from=build /usr/local/bin/rar2fs /usr/local/bin/
@@ -32,14 +32,14 @@ COPY scripts/ /usr/local/bin/
 
 # Everything runs as an unprivileged user. Only the setuid fusermount helper
 # uses SYS_ADMIN, so code parsing archives can't remount /sources writable.
-RUN chmod +x /entrypoint.sh /usr/local/bin/healthcheck /usr/local/bin/health-report /usr/local/bin/plex-refresh && ldconfig && rar2fs --version \
+RUN chmod +x /entrypoint.sh /usr/local/bin/healthcheck /usr/local/bin/health-report /usr/local/bin/plex-refresh /usr/local/bin/shortfs && ldconfig && rar2fs --version \
  && useradd --system --uid 1000 --no-create-home --shell /usr/sbin/nologin rar2fs \
  && chmod u+s /usr/bin/mergerfs-fusermount \
  && echo user_allow_other >> /etc/fuse.conf \
- && mkdir -p /view /merged /pass1 && chown rar2fs:rar2fs /view /merged /pass1
+ && mkdir -p /view /merged /pass1 /short && chown rar2fs:rar2fs /view /merged /pass1 /short
 USER rar2fs
 
 HEALTHCHECK --interval=60s --timeout=20s --start-period=60s --retries=3 CMD ["/usr/local/bin/healthcheck"]
 
-EXPOSE 8080
+EXPOSE 8080 8082
 ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]

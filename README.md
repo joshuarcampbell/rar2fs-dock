@@ -348,6 +348,51 @@ enable Docker Desktop → Settings → General → *Start Docker Desktop when yo
 
 ## Extras
 
+### Short names for Windows
+
+Many Windows programs fail on paths longer than 260 characters ("path too long", "file
+not found", or the file simply won't open). Release folders nested inside each other
+get there quickly. Turn this on and the container offers a second view of the same
+files, on port 8767, in which no path is too long:
+
+```ini
+SHORT_PATHS=1
+```
+
+Put that in `.env`, then run `docker compose up -d --build`.
+
+- **Only names that need it change.** A path that already fits is shown exactly as it
+  is. Nothing on disk is renamed.
+- **Folders are shortened, not files.** The file name is what players and Plex go by,
+  so it stays whole. The folder it sits in gives up the room instead:
+
+  ```
+  before  ...CHAMPIONSHIP.2026\WRC.FIA.WORLD.RALLY.CHAMPIONSHIP.2026.Rally.Japan.Aichi.Highlights.1080p.WEB.H264-13\<file>
+  after   ...CHAMPIONSHIP.2026\Rally.Japan.Aichi.Highlights.1080p~aa37\<file, unchanged>
+  ```
+
+  The part of a folder's name that just repeats its parent folder goes first, then the
+  end is cut. The 4-character tag after `~` keeps every name unique.
+- **A file is only shortened as a last resort,** when its folders can't make enough
+  room - typically a very long name several folders deep. It keeps its extension, and
+  files that belong together (`movie.mkv`, `movie.srt`, `movie.nfo`) keep matching names.
+- **The normal view on port 8765 is unchanged.** Keep using it for anything on Linux
+  or Mac: they have no such limit.
+
+**Using it:**
+
+- **This PC:** once `SHORT_PATHS=1` is in `.env`, the mount scripts use the short view
+  by themselves. Run `.\windows\uninstall-autostart.ps1` and then
+  `.\windows\install-autostart.ps1` to switch the drive over. Add `-Original` to keep the
+  full names on this PC.
+- **Other Windows PCs:** use port 8767 in the address, e.g.
+  `.\windows\mount.ps1 -Url http://<this-PC's-IP>:8767 -User <user> -Pass <password>`,
+  and allow port 8767 through Windows Firewall on this PC as well as 8765.
+
+The limit is `MAX_PATH` in `docker-compose.yml`: 230 characters, counted from the
+drive's root, which leaves room for the drive letter or a network name in front.
+Lower it if programs still complain. Reading through this view is as fast as the normal one.
+
 ### Health report
 
 Lists problems in your source folders: empty folders, RAR sets with parts missing,
@@ -433,6 +478,8 @@ connect at all. A password in `.env` is still required.
   built-in ISO mounting only works on local disks and normal Windows shares, not on
   this drive. Use [WinCDEmu](https://wincdemu.sysprogs.org/) (free) instead: right-click
   the ISO → *Select drive letter & mount*. 7-Zip and WinRAR can also open ISOs directly.
+- **"Path too long", or a file with a long name won't open** - see
+  [Short names for Windows](#short-names-for-windows).
 - **A source folder is missing** - check `docker logs rar2fs` for its `rar2fs:` line,
   and make sure the path in `docker-compose.yml` exists.
 - **Drive letter already in use** - `mount.ps1` stops with an error; pick another with `-Drive`.

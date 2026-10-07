@@ -77,5 +77,20 @@ if [ -n "$PLEX_URL" ] && [ -n "$PLEX_TOKEN" ]; then
   /usr/local/bin/plex-refresh &
 fi
 
+# ---- optional: a second view where over-long paths are shortened (for Windows) ----
+if [ "${SHORT_PATHS:-0}" = "1" ]; then
+  shortfs /view /short --max-path "${MAX_PATH:-230}" &
+  tries=0
+  until mountpoint -q /short || [ "$tries" -ge 20 ]; do sleep 0.5; tries=$((tries + 1)); done
+  if mountpoint -q /short; then
+    mounted="/short $mounted"
+    echo "shortfs: /view -> /short (paths up to ${MAX_PATH:-230} characters)"
+    rclone serve webdav /short --addr :8082 --read-only --htpasswd "$HTPASSWD" \
+      --dir-cache-time "${DIR_CACHE_TIME:-15s}" --ignore-case "$@" $RCLONE_OPTS &
+  else
+    echo "ERROR: the short-names view failed to start; the normal drive is unaffected"
+  fi
+fi
+
 exec rclone serve webdav /view --addr :8080 --read-only --htpasswd "$HTPASSWD" \
   --dir-cache-time "${DIR_CACHE_TIME:-15s}" --ignore-case "$@" $RCLONE_OPTS

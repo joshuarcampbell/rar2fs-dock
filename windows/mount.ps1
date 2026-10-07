@@ -2,12 +2,18 @@
 # Runs in the foreground; close the window (or Ctrl+C) to unmount.
 param(
     [string]$Drive = "Y:",
-    [string]$Url = "http://localhost:8765",
+    [string]$Url = "",   # default: this PC's server, chosen from the settings in ..\.env
     [string]$User = "",
-    [string]$Pass = ""
+    [string]$Pass = "",
+    [switch]$Original    # use the full-length names even when SHORT_PATHS=1 in ..\.env
 )
 
 $rclone = (Get-Command rclone -ErrorAction SilentlyContinue).Source
+if (-not $rclone) {
+    # Just installed with winget? It isn't on PATH until a new window is opened.
+    $wingetLink = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\rclone.exe"
+    if (Test-Path $wingetLink) { $rclone = $wingetLink }
+}
 if (-not $rclone) {
     Write-Error "rclone not found. Install it with: winget install Rclone.Rclone"
     exit 1
@@ -25,13 +31,21 @@ if ($running) {
         "letters, run .\windows\uninstall-autostart.ps1 then .\windows\install-autostart.ps1 -Drive $Drive")
 }
 
-# Without -User/-Pass, use the same credentials as the container (from ..\.env)
+# Settings shared with the container (..\.env): login, and the short-names view
 $envFile = Join-Path $PSScriptRoot "..\.env"
-if (-not $User -and (Test-Path $envFile)) {
+$envUser = ""; $envPass = ""; $short = $false
+if (Test-Path $envFile) {
     foreach ($line in Get-Content $envFile) {
-        if ($line -match '^\s*WEBDAV_USER\s*=\s*(.*)$') { $User = $Matches[1].Trim() }
-        if ($line -match '^\s*WEBDAV_PASS\s*=\s*(.*)$') { $Pass = $Matches[1].Trim() }
+        if ($line -match '^\s*WEBDAV_USER\s*=\s*(.*)$') { $envUser = $Matches[1].Trim() }
+        if ($line -match '^\s*WEBDAV_PASS\s*=\s*(.*)$') { $envPass = $Matches[1].Trim() }
+        if ($line -match '^\s*SHORT_PATHS\s*=\s*1\s*$') { $short = $true }
     }
+}
+if (-not $User) { $User = $envUser; $Pass = $envPass }
+if (-not $Url) {
+    # 8765 = full names; 8767 = names shortened to fit Windows' path limit
+    $port = if ($short -and -not $Original) { 8767 } else { 8765 }
+    $Url = "http://localhost:$port"
 }
 
 $rcloneArgs = @(
