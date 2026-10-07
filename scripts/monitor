@@ -58,6 +58,25 @@ while sleep "$INTERVAL"; do
     fi
   fi
 
+  # ---- the status page's own server: restart just that if it stops answering ----
+  # (It isn't part of the health check: a stuck status page is no reason to restart
+  # the drive under Plex.)
+  if [ "${TLS:-1}" = "1" ]; then page=https; else page=http; fi
+  code=$(curl -sk -o /dev/null -m 8 -w '%{http_code}' "$page://127.0.0.1:8081/")
+  if [ "$code" = "401" ] || [ "$code" = "200" ] || [ "$code" = "302" ]; then
+    page_fails=0
+  else
+    page_fails=$(( ${page_fails:-0} + 1 ))
+    if [ "$page_fails" -ge 2 ]; then
+      for p in /proc/[0-9]*; do
+        [ "$(cat "$p/comm" 2>/dev/null)" = "python3" ] && grep -q status-server "$p/cmdline" 2>/dev/null && kill -9 "${p#/proc/}"
+      done
+      status-server &
+      notify "Status page restarted" "The status page stopped answering and was restarted. The drive was not affected."
+      page_fails=0
+    fi
+  fi
+
   # ---- daily: newer unrar / rar2fs? ----
   if [ "$(age /state/versions)" -gt 86400 ]; then
     found=$(update-check)
