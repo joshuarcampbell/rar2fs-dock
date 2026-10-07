@@ -30,6 +30,10 @@ After installing rclone, open a **new** PowerShell window so it's on your PATH.
 Edit `docker-compose.yml`. Every volume mounted at `/sources/<name>` shows up as
 `Y:\<name>`.
 
+**The file comes with the author's own folders in it** (`F:/tv`, `H:/Games` and so
+on) under `volumes:`. Delete those lines and add your own. Keep the
+`./config:/config:ro` line.
+
 **Local folder or drive:**
 
 ```yaml
@@ -87,6 +91,17 @@ settings until it's recreated.
 Copy `.env.example` to `.env` and change `WEBDAV_PASS`. The container won't start
 without it. `.env` is gitignored, so the password never gets committed.
 
+**Long folder or file names?** If any of your paths come close to Windows' 260-character
+limit - release folders nested inside each other get there quickly - also add this
+line to `.env`:
+
+```ini
+SHORT_PATHS=1
+```
+
+The drive then shows shortened folder names where needed, so every file can be
+opened. See [Short names for Windows](#short-names-for-windows) for how it works.
+
 ### 3. Start the container
 
 From this folder:
@@ -136,6 +151,41 @@ New-NetFirewallRule -DisplayName "rar2fs-dock WebDAV" -Direction Inbound -Protoc
 - **Mac:** Finder → Go → Connect to Server → `http://<this-PC's-IP>:8765`.
 - **Media players** (Kodi, VLC, Infuse): add a WebDAV source with the same address and
   login.
+
+## Plex on the same Windows PC
+
+If Plex Media Server runs on the PC that runs rar2fs-dock, it can read the drive
+directly. No firewall rule is needed for that, and you can limit the server to this PC
+(see [Keeping it to this PC only](#keeping-it-to-this-pc-only)).
+
+1. **Finish [Setup](#setup)** so the drive (e.g. `Y:`) mounts at login. If your
+   folder or file names are long, set `SHORT_PATHS=1` in `.env` first, so no path
+   goes over Windows' 260-character limit.
+2. **In Plex, turn off automatic trash emptying:** Settings → Library → *Empty trash
+   automatically after every scan*. After a restart, Plex can start before Docker
+   has the drive ready. With this setting on, a scan in that gap would remove your
+   items and their watch history; with it off, they're only marked unavailable until
+   the drive is back.
+3. **Add the drive's folders to your libraries:** *Manage Library → Edit → Add
+   folders*, e.g. `Y:\movies`. If the drive isn't listed in the folder browser, type
+   the path in.
+4. **Scan the library.** The first scan is slower than on a normal disk, because Plex
+   reads inside every archive.
+
+Things to know:
+
+- **Plex must run as the same Windows user** that mounts the drive - the normal
+  installation does. If you've set Plex up to run as a Windows service under another
+  account, it won't see the drive letter.
+- **Docker Desktop has to be running.** Turn on Docker Desktop → Settings → General →
+  *Start Docker Desktop when you sign in*.
+- **New files appear at Plex's next scan.** Use *Scan Library Files*, or turn on
+  Settings → Library → *Scan my library periodically*. Plex can't detect changes on
+  this drive by itself, and the automatic trigger described under
+  [Telling Plex about new files straight away](#telling-plex-about-new-files-straight-away)
+  only supports Plex on Linux for now.
+- **Video inside RARs is new to Plex.** Files Plex already knew keep their metadata;
+  video it couldn't read before is added as new items.
 
 ## Plex on Linux
 
