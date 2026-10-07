@@ -101,8 +101,10 @@ From this folder:
 docker compose up -d --build
 ```
 
-Check that it's working by opening <http://localhost:8765> in a browser and logging in
-with the user and password from `.env` - you should see a folder for each source.
+Check that it's working by opening <https://localhost:8765> in a browser and logging in
+with the user and password from `.env` - you should see a folder for each source. The
+browser will warn that the certificate isn't trusted. That's expected: the container
+made the certificate itself (see [HTTPS](#https)). Choose *Advanced* → *Proceed*.
 
 ### 4. Mount the drive
 
@@ -128,20 +130,33 @@ That's it - open `Y:\` in Explorer.
 
 ## Using it from other machines
 
-The server is reachable from your network at `http://<this-PC's-IP>:8765`, using the
-login in `.env`. To use it, allow ports 8765 (the drive) and 8766 (the status page)
-through Windows Firewall (admin PowerShell, once):
+The server is reachable from your network at `https://<this-PC's-IP>:8765`, using the
+login in `.env`. Two things to do once on this PC:
+
+**1. Put this PC's address in the certificate.** Other devices check that the
+certificate matches the address they connect to. In `.env`, list every address or name
+they'll use, separated by commas, then run `docker compose up -d`:
+
+```ini
+TLS_HOSTS=192.168.1.63
+```
+
+**2. Allow ports 8765 (the drive) and 8766 (the status page)** through Windows
+Firewall (admin PowerShell):
 
 ```powershell
 New-NetFirewallRule -DisplayName "rar2fs-dock" -Direction Inbound -Protocol TCP -LocalPort 8765,8766 -Action Allow -Profile Private
 ```
 
 - **Plex (or anything else) on Linux:** see [Plex on Linux](#plex-on-linux) below.
-- **Another Windows PC:** copy the `windows` folder over, install WinFsp and rclone,
-  and run `.\windows\mount.ps1 -Url http://<this-PC's-IP>:8765 -User <user> -Pass <password>`.
-- **Mac:** Finder → Go → Connect to Server → `http://<this-PC's-IP>:8765`.
-- **Media players** (Kodi, VLC, Infuse): add a WebDAV source with the same address and
-  login.
+- **Another Windows PC:** copy the `windows` folder over, plus this PC's `tls\cert.pem`
+  into a `tls` folder next to it. Install WinFsp and rclone, and run
+  `.\windows\mount.ps1 -Url https://<this-PC's-IP>:8765 -User <user> -Pass <password>`.
+- **Mac, and media players** (Kodi, VLC, Infuse): add a WebDAV source at
+  `https://<this-PC's-IP>:8765` with the same login. Many of these refuse a
+  self-signed certificate or make it awkward to accept one. If yours does, either
+  install `tls\cert.pem` as a trusted certificate on that device, or turn HTTPS off
+  (see [HTTPS](#https)).
 
 ## Plex on Linux
 
@@ -203,11 +218,15 @@ In `docker-compose.yml`, the port line must be `"8765:8080"`, not
 New-NetFirewallRule -DisplayName "rar2fs-dock" -Direction Inbound -Protocol TCP -LocalPort 8765,8766 -Action Allow -Profile Private
 ```
 
+Also set `TLS_HOSTS` in `.env` to this PC's address (see
+[Using it from other machines](#using-it-from-other-machines)), or the Linux server
+will reject the certificate.
+
 Test from the Linux server. It should print `401`, which means it reached the server
-and was asked for a password:
+and was asked for a password (`-k` skips the certificate check for this one test):
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' http://<windows-pc-ip>:8765/
+curl -sk -o /dev/null -w '%{http_code}\n' https://<windows-pc-ip>:8765/
 ```
 
 If it hangs or says `000`, the firewall rule isn't working or the IP is wrong.
@@ -246,10 +265,14 @@ Fill it in with the Windows PC's IP and the `WEBDAV_USER` / `WEBDAV_PASS` from i
 `.env` file:
 
 ```ini
-RCLONE_WEBDAV_URL=http://192.168.1.63:8765
+RCLONE_WEBDAV_URL=https://192.168.1.63:8765
 RCLONE_WEBDAV_USER=rar2fs
 RCLONE_WEBDAV_PASS=<see below>
+RCLONE_CA_CERT=/etc/rar2fs/cert.pem
 ```
+
+`cert.pem` is the server's certificate: copy `tls\cert.pem` from the Windows PC to
+`/etc/rar2fs/cert.pem`. (The installer fetches it for you.)
 
 rclone needs the password in its own "obscured" form. Generate it with:
 
@@ -365,7 +388,7 @@ Windows, so set the PC to log in automatically, or keep it logged in.
 | To... | Run |
 |---|---|
 | Add or remove a source | Edit `docker-compose.yml`, then `docker compose up -d` |
-| See what it's doing | Open <http://localhost:8766/status.html> |
+| See what it's doing | Open <https://localhost:8766/status.html> |
 | See container logs | `docker logs rar2fs` |
 | Stop everything | `docker compose down` |
 | Remove the auto-mount | `.\windows\uninstall-autostart.ps1` |
@@ -377,8 +400,9 @@ enable Docker Desktop → Settings → General → *Start Docker Desktop when yo
 
 ### Status page
 
-<http://localhost:8766/status.html> (or `http://<this-PC's-IP>:8766/status.html` from
-another device), with the same login as the drive. It shows each folder, where it
+<https://localhost:8766/status.html> (or `https://<this-PC's-IP>:8766/status.html` from
+another device), with the same login as the drive. Your browser will warn about the
+self-signed certificate the first time; accept it once. It shows each folder, where it
 comes from and whether it's mounted, the unrar/rar2fs versions and whether newer ones
 exist, the last health report, and recent events (restarts, Plex scans, alerts). It
 refreshes every minute.
@@ -466,32 +490,44 @@ The build fails if the hash doesn't match the download, so a typo can't slip thr
 
 ### HTTPS
 
-By default the server uses plain HTTP, which is fine on a home network. Turn HTTPS on
-if the server is reached over networks you don't fully trust. **Every device that
-connects has to be updated at the same time**, so plan for a few minutes of downtime.
+The drive and the status page use HTTPS by default, so the password and your file
+names can't be read by other devices on the network.
 
-1. In `.env`, set `TLS=1` and list the names or addresses other devices use to reach
-   this PC:
-   ```ini
-   TLS=1
-   TLS_HOSTS=192.168.1.63
-   ```
-2. `docker compose up -d`. The first start creates a self-signed certificate in `tls\`
-   (gitignored) and prints its fingerprint - see `docker logs rar2fs`.
-3. **This PC:** `.\windows\uninstall-autostart.ps1` then `.\windows\install-autostart.ps1`.
-   The scripts switch to `https://` and trust `tls\cert.pem` automatically.
-4. **Linux machines:** run `sudo sh install.sh --url https://<this-PC's-IP>:8765 --user
-   <user> --pass '<password>'` again. It downloads the certificate, shows its
-   fingerprint to compare with step 2, and updates the settings. Then restart the
-   mounts: `sudo systemctl restart 'rar2fs@*'`.
-5. **Other Windows PCs:** copy `tls\cert.pem` into a `tls` folder next to their
-   `windows` folder, and use `-Url https://<this-PC's-IP>:8765`.
-6. The status page moves to `https://...:8766/status.html`. Browsers will warn about
-   the self-signed certificate; that's expected.
+- **The certificate is made by the container** the first time it starts, and kept in
+  `tls\` (gitignored). Its fingerprint is printed at every start - see
+  `docker logs rar2fs`.
+- **It's self-signed,** so nothing trusts it automatically. The scripts in this repo
+  handle that: the Windows scripts trust `tls\cert.pem`, and the Linux installer
+  downloads it and shows you the fingerprint to compare. Browsers show a warning you
+  accept once.
+- **`TLS_HOSTS` in `.env` lists the addresses in the certificate.** It always covers
+  `localhost`. Add this PC's IP address or name for other devices
+  (`TLS_HOSTS=192.168.1.63,mypc.lan`). Changing it creates a new certificate, and
+  other devices then need the new `cert.pem`.
+- **To use your own certificate,** put it in `tls\cert.pem` and `tls\key.pem`.
 
-To use your own certificate instead, put it in `tls\cert.pem` and `tls\key.pem` before
-step 2. Changing `TLS_HOSTS` later creates a new certificate, and devices need steps
-3-5 again.
+**Turning it off.** Some players and devices can't work with a self-signed
+certificate. For plain HTTP, put this in `.env` and run `docker compose up -d`:
+
+```ini
+TLS=0
+```
+
+Addresses then start with `http://`. Re-run `.\windows\uninstall-autostart.ps1` and
+`.\windows\install-autostart.ps1` on this PC, and the Linux installer with the `http://`
+address on Linux machines. On a home network you trust this is a reasonable choice;
+anywhere else, keep HTTPS on.
+
+**Upgrading from a version where HTTPS was off by default:** every device has to
+switch at the same time. Set `TLS_HOSTS`, run `docker compose up -d`, then:
+
+1. **This PC:** `.\windows\uninstall-autostart.ps1` then `.\windows\install-autostart.ps1`.
+2. **Linux machines:** `sudo sh install.sh --url https://<this-PC's-IP>:8765 --user
+   <user> --pass '<password>'`, then `sudo systemctl restart 'rar2fs@*'`.
+3. **Other Windows PCs:** copy the new `tls\cert.pem` over and use the `https://`
+   address.
+
+To put that off, set `TLS=0` for now.
 
 ### Health report
 
@@ -591,7 +627,7 @@ is still required.
   and make sure the path in `docker-compose.yml` exists.
 - **Drive letter already in use** - `mount.ps1` stops with an error; pick another with `-Drive`.
 - **Port 8765 already in use** - change the left side of `8765:8080` in
-  `docker-compose.yml` and pass the new address with `-Url http://localhost:<port>`.
+  `docker-compose.yml` and pass the new address with `-Url https://localhost:<port>`.
 
 ## Security
 
@@ -603,18 +639,34 @@ is still required.
   Every other program in the image that could raise its own privileges (`su`,
   `passwd`, `mount` and so on) has that ability removed.
 - **Password required.** The server is open to your local network, so it always
-  needs the login from `.env`. Compose refuses to start without one. By default it
-  uses plain HTTP, which is fine on a home network; see [HTTPS](#https) to encrypt it.
-  Either way, don't expose the ports to the internet - for access away from home, use
-  a VPN such as Tailscale. To shut out other machines entirely, see *Keeping it to
+  needs the login from `.env`. Compose refuses to start without one. Traffic is
+  encrypted with [HTTPS](#https) unless you turn that off. Either way, don't expose
+  the ports to the internet - for access away from home, use a VPN such as Tailscale. To shut out other machines entirely, see *Keeping it to
   this PC only*.
 - **The status page uses the same logins** as the drive, on port 8766. It shows your
   folder names and source paths, so it's password-protected too. Wrong passwords are
   slowed to about two guesses a second, its one action (starting a health report) is
   only accepted from the page itself, and it can't be embedded in another site.
-- **Use a long password.** The drive's own server (port 8765) doesn't slow down
-  password guessing, so the password is what protects it. `change-me` in
-  `.env.example` is a placeholder - replace it with something long and random.
+- **Password guessing is slowed down** on the drive as well. A login that has worked
+  is remembered and always let through. After more than five wrong logins in ten
+  seconds, logins that haven't worked before are refused for a while, so devices
+  already connected never notice and nobody can be locked out. Still use a long,
+  random password: `change-me` in `.env.example` is only a placeholder.
+- **AppArmor (Linux hosts).** Docker's default AppArmor profile blocks the FUSE mounts
+  this container needs, so it runs with AppArmor "unconfined". If you run it on a
+  Linux host that uses AppArmor, you can load the narrower profile in
+  `linux/apparmor/rar2fs-dock` instead - it allows FUSE mounts and nothing else that
+  Docker's default profile forbids:
+  ```bash
+  sudo cp linux/apparmor/rar2fs-dock /etc/apparmor.d/rar2fs-dock
+  sudo apparmor_parser -r /etc/apparmor.d/rar2fs-dock
+  echo 'APPARMOR_PROFILE=rar2fs-dock' >> .env
+  docker compose up -d
+  ```
+  That profile has **not been tested on a real AppArmor host yet**; if the container
+  then fails to mount its folders, remove the line from `.env` to go back. Docker
+  Desktop on Windows and Mac doesn't use AppArmor at all, so there is nothing to do
+  there.
 - **Pinned downloads.** The unrar and rar2fs source downloads are checked against
   SHA-256 hashes in the `Dockerfile`. Update the hash whenever you change a version.
 - **Keep it updated.** rar2fs uses unrar to read archives, and unrar has had security

@@ -12,6 +12,12 @@ REPORT_DAYS=${HEALTH_REPORT_DAYS:-7}
 mkdir -p /state/www
 export LC_ALL=C
 rm -f /state/report.running
+# The saved update check belongs to the image that made it. After a rebuild with other
+# versions, throw it away so the check runs again on the first pass.
+saved() { sed -n "s/^$1=//p" /state/versions 2>/dev/null; }
+if [ "$(saved unrar_built)" != "$UNRAR_VERSION" ] || [ "$(saved rar2fs_built)" != "$RAR2FS_VERSION" ]; then
+  rm -f /state/versions /state/versions.notified
+fi
 # upgrading from a version that timed the schedule by the report file itself
 [ -f /state/report.full ] || { [ -f /state/www/health-report.txt ] && touch -r /state/www/health-report.txt /state/report.full; }
 now() { date +%s; }

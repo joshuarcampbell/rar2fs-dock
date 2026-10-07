@@ -31,7 +31,7 @@ ARG UNRAR_VERSION
 ARG RAR2FS_VERSION
 ENV UNRAR_VERSION=${UNRAR_VERSION} RAR2FS_VERSION=${RAR2FS_VERSION}
 RUN apt-get update \
- && apt-get install -y --no-install-recommends fuse libfuse2 mergerfs rclone ca-certificates tini curl jq apache2-utils openssl python3 \
+ && apt-get install -y --no-install-recommends fuse libfuse2 mergerfs rclone ca-certificates tini curl jq apache2-utils openssl python3 haproxy \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=build /usr/lib/libunrar.so /usr/lib/
 COPY --from=build /usr/local/bin/rar2fs /usr/local/bin/

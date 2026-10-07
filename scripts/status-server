@@ -5,7 +5,7 @@
   POST /run-report  (form field: folder)      starts `run-health-report [folder]`
 
 Every request needs a login from the same list as the drive (/tmp/htpasswd).
-With TLS=1 it serves HTTPS using /tls/cert.pem and /tls/key.pem.
+It serves HTTPS using /tls/cert.pem and /tls/key.pem, unless TLS=0.
 """
 import base64
 import hashlib
@@ -21,6 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 WWW = '/state/www'
 HTPASSWD = '/tmp/htpasswd'
 VIEW = '/view'
+RUNNING = '/state/report.running'
 TYPES = {'.html': 'text/html; charset=utf-8', '.txt': 'text/plain; charset=utf-8',
          '.json': 'application/json', '.css': 'text/css'}
 FOLDER_OK = re.compile(r'^[^\x00-\x1f\\]{1,300}$')
@@ -138,15 +139,29 @@ class Handler(BaseHTTPRequestHandler):
         command = ['sh', '-c', 'run-health-report "$@" > /dev/null 2>&1 &', 'run-health-report']
         if folder:
             command.append(folder)
+        report = os.path.join(WWW, 'health-report.txt')
+        before = os.path.getmtime(report) if os.path.exists(report) else 0
         subprocess.run(command, timeout=10)
-        time.sleep(0.5)     # give it a moment to mark itself as running
+        # Don't reload the page on a guess. Wait until the report has either marked
+        # itself as running or (for a small folder) already finished, then rebuild
+        # the page here, so what the browser gets next always shows the result.
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            finished = os.path.exists(report) and os.path.getmtime(report) > before
+            if os.path.exists(RUNNING) or finished:
+                break
+            time.sleep(0.1)
+        try:
+            subprocess.run(['status-page'], timeout=60, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
         self._send(303, headers=[('Location', 'status.html')])
 
 
 def main():
     server = ThreadingHTTPServer(('0.0.0.0', 8081), Handler)
     server.daemon_threads = True
-    if os.environ.get('TLS', '0') == '1':
+    if os.environ.get('TLS', '1') == '1':
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.load_cert_chain('/tls/cert.pem', '/tls/key.pem')

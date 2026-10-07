@@ -8,7 +8,11 @@ services:
     cap_drop: [ALL]
     cap_add: [SYS_ADMIN]
     devices: [/dev/fuse]
-    security_opt: [apparmor:unconfined]
+    # AppArmor: "unconfined" because the default Docker profile blocks FUSE mounts.
+    # On a Linux host you can load linux/apparmor/rar2fs-dock and set
+    # APPARMOR_PROFILE=rar2fs-dock in .env instead (see README, "Security").
+    # Docker Desktop on Windows and Mac doesn't use AppArmor, so there it changes nothing.
+    security_opt: ["apparmor:${APPARMOR_PROFILE:-unconfined}"]
     ports:
       # Both are reachable from your network, behind the logins. To limit them to this
       # PC, put 127.0.0.1: in front of each, e.g. "127.0.0.1:8765:8080".
@@ -42,9 +46,13 @@ services:
       AUTO_RESTART: "1"
       # Run the health report every N days and alert on new problems. 0 = never.
       HEALTH_REPORT_DAYS: "7"
-      # Optional HTTPS (set TLS=1 in .env; see README before turning it on).
-      TLS: ${TLS:-0}
+      # HTTPS is on by default, with a certificate the container creates in ./tls.
+      # TLS_HOSTS (in .env) lists the addresses or names other devices use for this PC.
+      # Set TLS=0 in .env for plain HTTP (see README, "HTTPS").
+      TLS: ${TLS:-1}
       TLS_HOSTS: ${TLS_HOSTS:-}
+      # Wrong logins allowed in 10 seconds before new logins are refused for a while.
+      LOGIN_GUESS_LIMIT: "5"
     volumes:
       # Extra logins: config/users.htpasswd (see README, "More logins")
       - "./config:/config:ro"

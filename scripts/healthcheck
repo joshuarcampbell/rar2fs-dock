@@ -1,12 +1,16 @@
 #!/bin/sh
-# Healthy = every /view/<name> is a live rar2fs mount that can be listed,
-# and the WebDAV server answers (401 = up, asking for a login).
-for d in /view/*/; do
-  [ -d "$d" ] || continue
-  mountpoint -q "$d" || { echo "$d is not mounted"; exit 1; }
-  ls "$d" > /dev/null 2>&1 || { echo "$d cannot be listed"; exit 1; }
-done
-if [ "${TLS:-0}" = "1" ]; then scheme=https; else scheme=http; fi
+# Healthy = every mount the entrypoint made still answers, and the WebDAV server is up
+# (401 = up, asking for a login).
+#
+# The mounts are stacked (sources -> merged -> pass1 -> view) and each layer is its own
+# process. If one dies, the folder above it vanishes rather than showing an error, so
+# every layer is checked by name instead of looking at what happens to be in /view.
+EXPECTED=/tmp/mounts.expected
+[ -s "$EXPECTED" ] || { echo "no mounts were set up"; exit 1; }
+while IFS= read -r m; do
+  ls "$m" > /dev/null 2>&1 || { echo "$m has stopped responding"; exit 1; }
+done < "$EXPECTED"
+if [ "${TLS:-1}" = "1" ]; then scheme=https; else scheme=http; fi
 code=$(curl -sk -o /dev/null -m 5 -w '%{http_code}' "$scheme://127.0.0.1:8080/")
 [ "$code" = "401" ] || [ "$code" = "200" ] || { echo "WebDAV answered $code"; exit 1; }
 echo ok

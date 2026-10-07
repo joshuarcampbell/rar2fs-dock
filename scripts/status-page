@@ -50,10 +50,11 @@ button{background:var(--ok);border-color:var(--ok);color:#fff;font-weight:600;cu
 <section><h2>Folders</h2><table>
 <tr><th>Folder</th><th>Comes from</th><th>Status</th><th style="text-align:right">Items</th></tr>
 HTML
-for d in /view/*/; do
-  [ -d "$d" ] || continue
-  name=$(basename "$d")
-  if mountpoint -q "$d" && n=$(ls -1A "$d" 2>/dev/null | wc -l); then st='<span class="badge ok">mounted</span>'; else st='<span class="badge bad">not mounted</span>'; n='-'; fi
+# the folders that should exist, whether or not they are still alive
+folders=$(sed -n 's|^/view/||p' /tmp/mounts.expected 2>/dev/null)
+for name in $folders; do
+  d="/view/$name"
+  if ls "$d" > /dev/null 2>&1; then st='<span class="badge ok">mounted</span>'; n=$(ls -1A "$d" 2>/dev/null | wc -l); else st='<span class="badge bad">stopped</span>'; n='-'; fi
   from=$(awk -v a="/sources/$name" '$5 == a || index($5, a "/") == 1 || index($5, a "@") == 1 {print $5}' /proc/self/mountinfo | sort -u |
     while IFS= read -r m; do
       rel=${m#/sources/$name}; rel=${rel#@*}
@@ -66,7 +67,9 @@ echo '</table></section>'
 
 echo '<section><h2>Versions</h2><table><tr><th>Component</th><th>In this image</th><th>Latest</th><th></th></tr>'
 for c in unrar rar2fs; do
-  b=$(val "${c}_built"); l=$(val "${c}_latest")
+  # "In this image" comes from the running image itself, never from the saved check
+  if [ "$c" = unrar ]; then b=$UNRAR_VERSION; else b=$RAR2FS_VERSION; fi
+  l=$(val "${c}_latest")
   if [ -z "$l" ]; then note='<span class="dim">not checked yet</span>'
   elif [ "$b" = "$l" ] || [ "$(printf '%s\n%s\n' "$b" "$l" | sort -V | tail -1)" = "$b" ]; then note='<span class="badge ok">up to date</span>'
   else note='<span class="badge wait">update available</span>'; fi
@@ -91,9 +94,8 @@ elif [ ! -f /state/report.running ]; then
 fi
 # the button: everything, a folder, or one of the sub-folders a folder is made of
 echo '<form method="post" action="run-report" class="run"><label for="folder">Check</label> <select name="folder" id="folder"><option value="">Everything</option>'
-for d in /view/*/; do
-  [ -d "$d" ] || continue
-  name=$(basename "$d")
+for name in $folders; do
+  ls "/view/$name" > /dev/null 2>&1 || continue      # a stopped folder can't be checked
   printf '<option value="%s">%s</option>\n' "$(printf '%s' "$name" | esc)" "$(printf '%s' "$name" | esc)"
   awk -v a="/sources/$name/" 'index($5, a) == 1 { s = substr($5, length(a) + 1); if (s !~ /\//) print s }' /proc/self/mountinfo | sort -u |
     while IFS= read -r sub; do
@@ -124,11 +126,11 @@ cat <<HTML
 <tr><td>Notifications</td><td>$( [ -n "$NOTIFY_URL" ] && echo on || echo 'off (no NOTIFY_URL)')</td></tr>
 <tr><td>Automatic restart</td><td>$( [ "${AUTO_RESTART:-1}" = 1 ] && echo on || echo off)</td></tr>
 <tr><td>Archives inside archives</td><td>$( [ "${NESTED_RAR:-1}" = 1 ] && echo on || echo off)</td></tr>
-<tr><td>HTTPS</td><td>$( [ "${TLS:-0}" = 1 ] && echo on || echo off)</td></tr>
+<tr><td>HTTPS</td><td>$( [ "${TLS:-1}" = 1 ] && echo on || echo off)</td></tr>
 <tr><td>Logins</td><td>$(cut -d: -f1 /tmp/htpasswd 2>/dev/null | esc | tr '\n' ' ')</td></tr>
 <tr><td>Hidden</td><td><code>$(printf '%s' "${HIDE-default}" | esc)</code></td></tr>
 </table></section>
 <script>for(const t of document.querySelectorAll('time[data-t]')){const d=new Date(t.dataset.t*1000);if(!isNaN(d)){t.textContent=d.toLocaleString();t.dateTime=d.toISOString()}}</script>
 </main></body></html>
 HTML
-} > "$out.tmp" && mv "$out.tmp" "$out"
+} > "$out.$$.tmp" && mv "$out.$$.tmp" "$out"     # own temp file: several can run at once

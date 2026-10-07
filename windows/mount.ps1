@@ -27,12 +27,12 @@ if ($running) {
 
 # Settings shared with the container (..\.env): login, and whether HTTPS is on
 $envFile = Join-Path $PSScriptRoot "..\.env"
-$envUser = ""; $envPass = ""; $tls = $false
+$envUser = ""; $envPass = ""; $tls = $true    # HTTPS unless .env says TLS=0
 if (Test-Path $envFile) {
     foreach ($line in Get-Content $envFile) {
         if ($line -match '^\s*WEBDAV_USER\s*=\s*(.*)$') { $envUser = $Matches[1].Trim() }
         if ($line -match '^\s*WEBDAV_PASS\s*=\s*(.*)$') { $envPass = $Matches[1].Trim() }
-        if ($line -match '^\s*TLS\s*=\s*1\s*$') { $tls = $true }
+        if ($line -match '^\s*TLS\s*=\s*0\s*$') { $tls = $false }
     }
 }
 if (-not $User) { $User = $envUser; $Pass = $envPass }
