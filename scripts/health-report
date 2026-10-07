@@ -1,0 +1,82 @@
+#!/bin/sh
+# Lists problems in the source folders:
+#   - empty folders
+#   - RAR sets with parts missing from the middle of the numbering
+#   - RAR parts with no main .rar file
+#   - folders whose archives rar2fs could not open (broken, incomplete or password-protected)
+#
+# Usage: health-report [folder]     e.g. health-report tv/tv-1   (default: everything)
+# It only reads; nothing is changed.
+
+arg=${1%/}
+if [ -z "$arg" ]; then
+  set -- /sources/*/
+else
+  first=${arg%%/*}; rest=${arg#"$first"}
+  set --
+  for r in "/sources/$first" /sources/"$first"@*; do
+    [ -d "$r$rest" ] && set -- "$@" "$r$rest"
+  done
+  [ $# -gt 0 ] || { echo "No such folder: $arg"; exit 1; }
+fi
+
+# /sources/tv@e/Show -> /view/tv/Show
+view_of() {
+  rel=${1#/sources/}; top=${rel%%/*}; tail=${rel#"$top"}
+  printf '/view/%s%s' "${top%%@*}" "$tail"
+}
+show() { printf '  %s\n' "${1#/sources/}"; }
+
+skip='-name @Recycle -o -name .qsyncclient -o -name #recycle -o -name $RECYCLE.BIN'
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+
+echo "Scanning: $(for r in "$@"; do printf '%s ' "${r#/sources/}"; done)"
+find "$@" \( $skip \) -prune -o -type d -empty -print 2>/dev/null | sort > "$tmp/empty"
+find "$@" \( $skip \) -prune -o -type f \( -iname '*.rar' -o -iname '*.r[0-9][0-9]' \) -print 2>/dev/null | sort > "$tmp/rars"
+
+: > "$tmp/gaps"; : > "$tmp/orphans"; : > "$tmp/unreadable"
+
+# one line per folder that holds archives
+sed 's|/[^/]*$||' "$tmp/rars" | uniq > "$tmp/dirs"
+while IFS= read -r dir; do
+  ls -1 "$dir" > "$tmp/ls" 2>/dev/null || continue
+
+  # old style: name.rar + name.r00, name.r01 ...
+  grep -i '\.r[0-9][0-9]$' "$tmp/ls" | sed 's/\.[rR][0-9][0-9]$//' | sort -u > "$tmp/stems"
+  while IFS= read -r stem; do
+    [ -n "$stem" ] || continue
+    grep -qixF "$stem.rar" "$tmp/ls" || echo "$dir/$stem.r00 (no $stem.rar)" >> "$tmp/orphans"
+    awk -v s="$stem" 'BEGIN{n=length(s)}
+      tolower(substr($0,1,n+2))==tolower(s) ".r" && substr($0,n+3) ~ /^[0-9][0-9]$/ {c++; v=substr($0,n+3)+0; if (v>m) m=v}
+      END{ if (c && c != m+1) printf "%d of %d parts\n", c, m+1 }' "$tmp/ls" > "$tmp/gap"
+    [ -s "$tmp/gap" ] && echo "$dir/$stem.rar ($(cat "$tmp/gap"))" >> "$tmp/gaps"
+  done < "$tmp/stems"
+
+  # new style: name.part01.rar, name.part02.rar ...
+  grep -i '\.part[0-9][0-9]*\.rar$' "$tmp/ls" | sed 's/\.[pP][aA][rR][tT][0-9][0-9]*\.[rR][aA][rR]$//' | sort -u > "$tmp/stems"
+  while IFS= read -r stem; do
+    [ -n "$stem" ] || continue
+    awk -v s="$stem" 'BEGIN{n=length(s)}
+      tolower(substr($0,1,n+5))==tolower(s) ".part" { v=substr($0,n+6); sub(/\.[rR][aA][rR]$/,"",v); if (v ~ /^[0-9]+$/) {c++; if (v+0>m) m=v+0} }
+      END{ if (c && c != m) printf "%d of %d parts\n", c, m }' "$tmp/ls" > "$tmp/gap"
+    [ -s "$tmp/gap" ] && echo "$dir/$stem.part*.rar ($(cat "$tmp/gap"))" >> "$tmp/gaps"
+  done < "$tmp/stems"
+
+  # readable = rar2fs shows at least one file here that is not in the raw folder
+  if grep -qi '\.rar$' "$tmp/ls"; then
+    ls -1 "$(view_of "$dir")" 2>/dev/null | grep -vxFf "$tmp/ls" | grep -q . || echo "$dir" >> "$tmp/unreadable"
+  fi
+done < "$tmp/dirs"
+
+section() {  # title, file
+  n=$(wc -l < "$2")
+  echo; echo "== $1: $n"
+  while IFS= read -r line; do show "$line"; done < "$2"
+}
+section "Empty folders" "$tmp/empty"
+section "RAR sets with missing parts" "$tmp/gaps"
+section "RAR parts with no main .rar file" "$tmp/orphans"
+section "Folders with archives that could not be opened" "$tmp/unreadable"
+echo
+echo "Checked $(wc -l < "$tmp/dirs") folders containing archives."
+echo "Note: a set that is only missing its LAST parts cannot be detected from file names."

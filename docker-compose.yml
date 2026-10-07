@@ -20,7 +20,17 @@ services:
       RAR2FS_OPTS: "--seek-length=1 -o warmup"
       WEBDAV_USER: ${WEBDAV_USER:?set WEBDAV_USER in .env}
       WEBDAV_PASS: ${WEBDAV_PASS:?set WEBDAV_PASS in .env}
+      # Open archives inside archives too (e.g. scene subtitle packs). 0 = off.
+      NESTED_RAR: "1"
+      # Files and folders to hide, ;-separated. Set to "" to show everything.
+      HIDE: "*.sfv;Thumbs.db;desktop.ini;.DS_Store;@Recycle/**;.qsyncclient/**;Sample/**;Proof/**"
+      # Optional: ask Plex to scan a folder as soon as it changes (see README).
+      PLEX_URL: ${PLEX_URL:-}
+      PLEX_TOKEN: ${PLEX_TOKEN:-}
+      PLEX_PATH_MAP: ${PLEX_PATH_MAP:-}
     volumes:
+      # Extra logins: config/users.htpasswd (see README, "More logins")
+      - "./config:/config:ro"
       # Each folder under /sources/<name> shows up as <drive>:\<name>
       # Format: "<Windows path, forward slashes>:/sources/<name>:ro"
       #

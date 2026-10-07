@@ -1,0 +1,11 @@
+#!/bin/sh
+# Healthy = every /view/<name> is a live rar2fs mount that can be listed,
+# and the WebDAV server answers (401 = up, asking for a login).
+for d in /view/*/; do
+  [ -d "$d" ] || continue
+  mountpoint -q "$d" || { echo "$d is not mounted"; exit 1; }
+  ls "$d" > /dev/null 2>&1 || { echo "$d cannot be listed"; exit 1; }
+done
+code=$(curl -s -o /dev/null -m 5 -w '%{http_code}' http://127.0.0.1:8080/)
+[ "$code" = "401" ] || [ "$code" = "200" ] || { echo "WebDAV answered $code"; exit 1; }
+echo ok

@@ -279,8 +279,9 @@ Otherwise both will try to use the same folder at boot.
 sudo systemctl enable --now rar2fs@tv rar2fs@films
 ```
 
-`enable` makes them start at every boot; they wait for the network and retry on their
-own if the Windows PC isn't up yet.
+`enable` makes them start at every boot. A mount only starts once the Windows PC's
+server answers, and keeps retrying until it does, so Plex never sees an empty folder
+just because the PC was slower to boot.
 
 Check them:
 
@@ -314,9 +315,8 @@ inside RARs is new to Plex, so it's added as new items.
 | Add a folder | Add a `.conf` file, then `sudo systemctl enable --now rar2fs@<name>` |
 | Remove a folder | `sudo systemctl disable --now rar2fs@<name>`, then delete its `.conf` |
 
-**New or changed folders take up to an hour to show up.** The mounts cache folder
-listings for an hour, to keep Plex scans fast. Restart the mount to see changes
-immediately, e.g. after changing `docker-compose.yml` on the Windows PC. To change the
+**New or changed folders take up to a minute to show up.** The mounts cache folder
+listings for a minute. Restart the mount to see changes immediately. To change the
 cache time, edit `--dir-cache-time` in `/etc/systemd/system/rar2fs@.service` and run
 `sudo systemctl daemon-reload`.
 
@@ -345,6 +345,77 @@ Windows, so set the PC to log in automatically, or keep it logged in.
 
 The container restarts on its own with Docker Desktop. For a fully hands-off setup,
 enable Docker Desktop → Settings → General → *Start Docker Desktop when you sign in*.
+
+## Extras
+
+### Health report
+
+Lists problems in your source folders: empty folders, RAR sets with parts missing,
+RAR parts with no main `.rar`, and folders whose archives couldn't be opened (broken,
+incomplete or password-protected). It only reads; nothing is changed.
+
+```powershell
+docker exec rar2fs health-report              # everything (can take a while)
+docker exec rar2fs health-report tv/tv-1      # one folder
+```
+
+A set that is only missing its *last* parts can't be spotted from file names, so it
+won't be listed.
+
+### Health check
+
+Docker checks every minute that each folder is still mounted and the server answers.
+`docker ps` shows `(healthy)` or `(unhealthy)` next to the container. If it's
+unhealthy, `docker compose restart` usually fixes it; `docker inspect rar2fs
+--format '{{json .State.Health.Log}}'` shows which check failed.
+
+### Archives inside archives (subtitles)
+
+Scene releases often pack subtitles as a RAR inside a RAR
+(`Subs/x.subs.rar` → `x.idx` + `x.rar` → `x.sub`). With `NESTED_RAR: "1"` (the default)
+both levels are opened, so `Subs/` shows the `.idx` and `.sub` files. It costs roughly
+15% of read speed; set it to `"0"` in `docker-compose.yml` to turn it off.
+
+### Hiding clutter
+
+`HIDE` in `docker-compose.yml` is a `;`-separated list of files and folders to leave
+out of the drive. By default it hides `.sfv` files, `Sample` and `Proof` folders,
+Windows/Mac thumbnail files and NAS recycle bins. Names match in any folder and ignore
+upper/lower case; `Sample/**` means "a folder called Sample and everything in it".
+Set `HIDE: ""` to show everything.
+
+### More logins
+
+The login in `.env` always works. To give another person or device its own login:
+
+```powershell
+.\windows\add-user.ps1 -Name plex -Pass 'some-password'
+```
+
+Logins are stored (hashed) in `config\users.htpasswd`, which is gitignored. To revoke
+one, delete its line and run `docker compose restart`.
+
+### Telling Plex about new files straight away
+
+Plex can't detect changes on a network mount by itself, so new files normally wait for
+its next scheduled scan. Set these in `.env` and the container will watch your source
+folders and ask Plex to scan just the folder that changed:
+
+```ini
+PLEX_URL=http://192.168.1.50:32400
+PLEX_TOKEN=xxxxxxxxxxxxxxxxxxxx
+PLEX_PATH_MAP=tv=/mnt/media/tv;films=/mnt/media/films
+```
+
+- `PLEX_TOKEN`: in Plex Web, open any item → **⋯** → *Get Info* → *View XML*. The
+  token is the `X-Plex-Token=...` value at the end of the address bar.
+- `PLEX_PATH_MAP`: where each folder is mounted on the Plex server, as
+  `<folder on the drive>=<path on the Plex server>`.
+
+It checks once a minute and waits until a folder has stopped changing, so a new
+download reaches Plex about 2-3 minutes after it finishes. `docker logs rar2fs` shows
+a `plex-refresh:` line for every scan it requests. Leave `PLEX_TOKEN` empty to turn
+this off.
 
 ## Keeping it to this PC only
 

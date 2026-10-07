@@ -1,0 +1,86 @@
+#!/bin/sh
+# Watches the source folders and asks Plex to scan just the folder that changed.
+# Started by the entrypoint when PLEX_URL and PLEX_TOKEN are set.
+#
+#   PLEX_URL            e.g. http://192.168.1.223:32400
+#   PLEX_TOKEN          your X-Plex-Token
+#   PLEX_PATH_MAP       where each folder is mounted on the Plex server, ;-separated:
+#                       tv=/mnt/media/tv;films=/mnt/media/films
+#   PLEX_POLL_SECONDS   how often to look for changes (default 60)
+#   PLEX_SETTLE_SECONDS wait after the last change before scanning (default 90)
+#   PLEX_WATCH_DEPTH    how many folder levels to watch (default 4)
+
+POLL=${PLEX_POLL_SECONDS:-60}
+SETTLE=${PLEX_SETTLE_SECONDS:-90}
+DEPTH=${PLEX_WATCH_DEPTH:-4}
+dir=$(mktemp -d)
+export LC_ALL=C     # comm needs byte-order sorting
+log() { echo "plex-refresh: $*"; }
+
+snapshot() {
+  find /sources -mindepth 1 -maxdepth "$DEPTH" \
+    \( -name '@Recycle' -o -name '.qsyncclient' \) -prune -o -type d -printf '%T@\t%p\n' 2>/dev/null | sort
+}
+
+plex() {  # path-and-query, extra curl args...
+  url="$PLEX_URL$1"; shift
+  printf 'header = "X-Plex-Token: %s"\nheader = "Accept: application/json"\n' "$PLEX_TOKEN" |
+    curl -fsS -m 20 -K - "$@" "$url"
+}
+
+# /sources/tv@e/Show -> tv/Show -> /mnt/media/tv/Show (via PLEX_PATH_MAP)
+plex_path() {
+  rel=${1#/sources/}; top=${rel%%/*}; rel="${top%%@*}${rel#"$top"}"
+  best=""; out=""
+  old_ifs=$IFS; IFS=';'
+  for pair in $PLEX_PATH_MAP; do
+    k=${pair%%=*}; v=${pair#*=}
+    case "$rel/" in
+      "$k"/*) [ ${#k} -gt ${#best} ] && { best=$k; out="$v${rel#"$k"}"; } ;;
+    esac
+  done
+  IFS=$old_ifs
+  printf '%s' "$out"
+}
+
+scan() {  # source path
+  p=$(plex_path "$1")
+  [ -n "$p" ] || { log "no PLEX_PATH_MAP entry covers ${1#/sources/} - skipped"; return; }
+  key=$(jq -r --arg p "$p/" '
+    [.MediaContainer.Directory[] | .key as $k | .Location[] | {k: $k, l: (.path | sub("/+$"; "") + "/")}
+     | select(.l as $l | $p | startswith($l))] | sort_by(.l | length) | last | .k // empty' "$dir/sections")
+  [ -n "$key" ] || { log "no Plex library contains $p - skipped"; return; }
+  if plex "/library/sections/$key/refresh" -G --data-urlencode "path=$p" > /dev/null; then
+    log "asked Plex to scan $p (library $key)"
+  else
+    log "Plex scan request failed for $p"
+  fi
+}
+
+log "watching /sources every ${POLL}s (depth $DEPTH), Plex at $PLEX_URL"
+snapshot > "$dir/prev"
+: > "$dir/pending"
+while sleep "$POLL"; do
+  snapshot > "$dir/cur"
+  # new or modified folders, plus the parents of removed ones
+  {
+    comm -13 "$dir/prev" "$dir/cur" | cut -f2-
+    cut -f2- "$dir/prev" | sort > "$dir/p"; cut -f2- "$dir/cur" | sort > "$dir/c"
+    comm -23 "$dir/p" "$dir/c" | sed 's|/[^/]*$||'
+  } | grep -v '^/sources$' | sort -u > "$dir/changed"
+  mv "$dir/cur" "$dir/prev"
+
+  if [ -s "$dir/changed" ]; then
+    sort -u "$dir/changed" "$dir/pending" > "$dir/tmp" && mv "$dir/tmp" "$dir/pending"
+    continue            # still changing - wait for a quiet poll
+  fi
+  [ -s "$dir/pending" ] || continue
+
+  sleep "$SETTLE"
+  plex "/library/sections" > "$dir/sections" || { log "cannot reach Plex at $PLEX_URL - will retry"; continue; }
+  # scan the deepest folders only: drop any folder that contains another changed one
+  while IFS= read -r path; do
+    grep -qF "$path/" "$dir/pending" || scan "$path"
+  done < "$dir/pending"
+  : > "$dir/pending"
+done
