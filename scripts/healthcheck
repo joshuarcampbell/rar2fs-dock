@@ -13,4 +13,9 @@ done < "$EXPECTED"
 if [ "${TLS:-1}" = "1" ]; then scheme=https; else scheme=http; fi
 code=$(curl -sk -o /dev/null -m 5 -w '%{http_code}' "$scheme://127.0.0.1:8080/")
 [ "$code" = "401" ] || [ "$code" = "200" ] || { echo "WebDAV answered $code"; exit 1; }
+if [ "${SHORT_PATHS:-0}" = "1" ]; then
+  mountpoint -q /short && ls /short > /dev/null 2>&1 || { echo "the short-names view is not mounted"; exit 1; }
+  code=$(curl -sk -o /dev/null -m 5 -w '%{http_code}' "$scheme://127.0.0.1:8082/")
+  [ "$code" = "401" ] || [ "$code" = "200" ] || { echo "short-names server answered $code"; exit 1; }
+fi
 echo ok

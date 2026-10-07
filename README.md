@@ -36,6 +36,10 @@ After installing rclone, open a **new** PowerShell window so it's on your PATH.
 Edit `docker-compose.yml`. Every volume mounted at `/sources/<name>` shows up as
 `Y:\<name>`.
 
+**The file comes with the author's own folders in it** (`F:/tv`, `H:/Games` and so
+on) under `volumes:`. Delete those lines and add your own. Keep the
+`./config:/config:ro` line.
+
 **Local folder or drive:**
 
 ```yaml
@@ -93,6 +97,17 @@ settings until it's recreated.
 Copy `.env.example` to `.env` and change `WEBDAV_PASS`. The container won't start
 without it. `.env` is gitignored, so the password never gets committed.
 
+**Long folder or file names?** If any of your paths come close to Windows' 260-character
+limit - release folders nested inside each other get there quickly - also add this
+line to `.env`:
+
+```ini
+SHORT_PATHS=1
+```
+
+The drive then shows shortened folder names where needed, so every file can be
+opened. See [Short names for Windows](#short-names-for-windows) for how it works.
+
 ### 3. Start the container
 
 From this folder:
@@ -141,11 +156,12 @@ they'll use, separated by commas, then run `docker compose up -d`:
 TLS_HOSTS=192.168.1.63
 ```
 
-**2. Allow ports 8765 (the drive) and 8766 (the status page)** through Windows
+**2. Allow ports 8765 (the drive), 8766 (the status page) and 8767 (the short-names
+view)** through Windows
 Firewall (admin PowerShell):
 
 ```powershell
-New-NetFirewallRule -DisplayName "rar2fs-dock" -Direction Inbound -Protocol TCP -LocalPort 8765,8766 -Action Allow -Profile Private
+New-NetFirewallRule -DisplayName "rar2fs-dock" -Direction Inbound -Protocol TCP -LocalPort 8765-8767 -Action Allow -Profile Private
 ```
 
 - **Plex (or anything else) on Linux:** see [Plex on Linux](#plex-on-linux) below.
@@ -157,6 +173,40 @@ New-NetFirewallRule -DisplayName "rar2fs-dock" -Direction Inbound -Protocol TCP 
   self-signed certificate or make it awkward to accept one. If yours does, either
   install `tls\cert.pem` as a trusted certificate on that device, or turn HTTPS off
   (see [HTTPS](#https)).
+
+## Plex on the same Windows PC
+
+If Plex Media Server runs on the PC that runs rar2fs-dock, it can read the drive
+directly. No firewall rule is needed for that, and you can limit the server to this PC
+(see [Keeping it to this PC only](#keeping-it-to-this-pc-only)).
+
+1. **Finish [Setup](#setup)** so the drive (e.g. `Y:`) mounts at login. If your
+   folder or file names are long, set `SHORT_PATHS=1` in `.env` first, so no path
+   goes over Windows' 260-character limit.
+2. **In Plex, turn off automatic trash emptying:** Settings → Library → *Empty trash
+   automatically after every scan*. After a restart, Plex can start before Docker
+   has the drive ready. With this setting on, a scan in that gap would remove your
+   items and their watch history; with it off, they're only marked unavailable until
+   the drive is back.
+3. **Add the drive's folders to your libraries:** *Manage Library → Edit → Add
+   folders*, e.g. `Y:\movies`. If the drive isn't listed in the folder browser, type
+   the path in.
+4. **Scan the library.** The first scan is slower than on a normal disk, because Plex
+   reads inside every archive.
+
+Things to know:
+
+- **Plex must run as the same Windows user** that mounts the drive - the normal
+  installation does. If you've set Plex up to run as a Windows service under another
+  account, it won't see the drive letter.
+- **Docker Desktop has to be running.** Turn on Docker Desktop → Settings → General →
+  *Start Docker Desktop when you sign in*.
+- **New files appear at Plex's next scan.** Plex can't detect changes on this drive
+  by itself. Either use *Scan Library Files* / Settings → Library → *Scan my library
+  periodically*, or let the container tell Plex the moment something changes - see
+  [Telling Plex about new files straight away](#telling-plex-about-new-files-straight-away).
+- **Video inside RARs is new to Plex.** Files Plex already knew keep their metadata;
+  video it couldn't read before is added as new items.
 
 ## Plex on Linux
 
@@ -215,7 +265,7 @@ In `docker-compose.yml`, the port line must be `"8765:8080"`, not
 **admin** PowerShell (8765 is the drive, 8766 the status page):
 
 ```powershell
-New-NetFirewallRule -DisplayName "rar2fs-dock" -Direction Inbound -Protocol TCP -LocalPort 8765,8766 -Action Allow -Profile Private
+New-NetFirewallRule -DisplayName "rar2fs-dock" -Direction Inbound -Protocol TCP -LocalPort 8765-8767 -Action Allow -Profile Private
 ```
 
 Also set `TLS_HOSTS` in `.env` to this PC's address (see
@@ -528,6 +578,50 @@ switch at the same time. Set `TLS_HOSTS`, run `docker compose up -d`, then:
    address.
 
 To put that off, set `TLS=0` for now.
+### Short names for Windows
+
+Many Windows programs fail on paths longer than 260 characters ("path too long", "file
+not found", or the file simply won't open). Release folders nested inside each other
+get there quickly. Turn this on and the container offers a second view of the same
+files, on port 8767, in which no path is too long:
+
+```ini
+SHORT_PATHS=1
+```
+
+Put that in `.env`, then run `docker compose up -d`.
+
+- **Only names that need it change.** A path that already fits is shown exactly as it
+  is. Nothing on disk is renamed.
+- **Folders are shortened, not files.** The file name is what players and Plex go by,
+  so it stays whole. The folder it sits in gives up the room instead:
+
+  ```
+  before  ...CHAMPIONSHIP.2026\WRC.FIA.WORLD.RALLY.CHAMPIONSHIP.2026.Rally.Japan.Aichi.Highlights.1080p.WEB.H264-13\<file>
+  after   ...CHAMPIONSHIP.2026\Rally.Japan.Aichi.Highlights.1080p~aa37\<file, unchanged>
+  ```
+
+  The part of a folder's name that just repeats its parent folder goes first, then the
+  end is cut. The 4-character tag after `~` keeps every name unique.
+- **A file is only shortened as a last resort,** when its folders can't make enough
+  room - typically a very long name several folders deep. It keeps its extension, and
+  files that belong together (`movie.mkv`, `movie.srt`, `movie.nfo`) keep matching names.
+- **The normal view on port 8765 is unchanged.** Keep using it for anything on Linux
+  or Mac: they have no such limit.
+
+**Using it:**
+
+- **This PC:** once `SHORT_PATHS=1` is in `.env`, the mount scripts use the short view
+  by themselves. Run `.\windows\uninstall-autostart.ps1` and then
+  `.\windows\install-autostart.ps1` to switch the drive over. Add `-Original` to keep the
+  full names on this PC.
+- **Other Windows PCs:** use port 8767 in the address, e.g.
+  `.\windows\mount.ps1 -Url https://<this-PC's-IP>:8767 -User <user> -Pass <password>`.
+  It uses the same certificate, login and guess-throttling as the normal drive.
+
+The limit is `MAX_PATH` in `docker-compose.yml`: 230 characters, counted from the
+drive's root, which leaves room for the drive letter or a network name in front.
+Lower it if programs still complain. Reading through this view is as fast as the normal one.
 
 ### Health report
 
@@ -590,16 +684,35 @@ Plex can't detect changes on a network mount by itself, so new files normally wa
 its next scheduled scan. Set these in `.env` and the container will watch your source
 folders and ask Plex to scan just the folder that changed:
 
+**Plex on Linux** (another machine):
+
 ```ini
 PLEX_URL=http://192.168.1.50:32400
 PLEX_TOKEN=xxxxxxxxxxxxxxxxxxxx
 PLEX_PATH_MAP=tv=/mnt/media/tv;films=/mnt/media/films
 ```
 
+**Plex on this Windows PC** (`Y:` being the rar2fs drive):
+
+```ini
+PLEX_URL=http://host.docker.internal:32400
+PLEX_TOKEN=xxxxxxxxxxxxxxxxxxxx
+PLEX_PATH_MAP=tv=Y:\tv;films=Y:\films
+```
+
+Then run `docker compose up -d`.
+
+- `PLEX_URL`: where Plex answers. `host.docker.internal` is how the container reaches
+  the PC it runs on; don't use `localhost` here.
 - `PLEX_TOKEN`: in Plex Web, open any item → **⋯** → *Get Info* → *View XML*. The
   token is the `X-Plex-Token=...` value at the end of the address bar.
 - `PLEX_PATH_MAP`: where each folder is mounted on the Plex server, as
-  `<folder on the drive>=<path on the Plex server>`.
+  `<folder on the drive>=<path on the Plex server>`, separated by `;`. Use the same
+  paths your Plex libraries use. **Don't put quotes around it** - inside quotes, `\t`
+  in `Y:\tv` is read as a tab. `Y:/tv` works too.
+- **With `SHORT_PATHS=1`,** Plex on Windows sees shortened folder names, and the
+  container asks for those automatically. If you mounted the drive with `-Original`,
+  add `PLEX_SHORT_NAMES=0` to `.env` so it asks for the full names instead.
 
 It checks once a minute and waits until a folder has stopped changing, so a new
 download reaches Plex about 2-3 minutes after it finishes. `docker logs rar2fs` shows
@@ -623,6 +736,8 @@ is still required.
   built-in ISO mounting only works on local disks and normal Windows shares, not on
   this drive. Use [WinCDEmu](https://wincdemu.sysprogs.org/) (free) instead: right-click
   the ISO → *Select drive letter & mount*. 7-Zip and WinRAR can also open ISOs directly.
+- **"Path too long", or a file with a long name won't open** - see
+  [Short names for Windows](#short-names-for-windows).
 - **A source folder is missing** - check `docker logs rar2fs` for its `rar2fs:` line,
   and make sure the path in `docker-compose.yml` exists.
 - **Drive letter already in use** - `mount.ps1` stops with an error; pick another with `-Drive`.

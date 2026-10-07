@@ -14,12 +14,14 @@ services:
     # Docker Desktop on Windows and Mac doesn't use AppArmor, so there it changes nothing.
     security_opt: ["apparmor:${APPARMOR_PROFILE:-unconfined}"]
     ports:
-      # Both are reachable from your network, behind the logins. To limit them to this
+      # All are reachable from your network, behind the logins. To limit them to this
       # PC, put 127.0.0.1: in front of each, e.g. "127.0.0.1:8765:8080".
       # The drive (WebDAV):
       - "8765:8080"
-      # Status page: http://localhost:8766/status.html
+      # Status page: https://localhost:8766/status.html
       - "8766:8081"
+      # Short-names view of the drive (only answers when SHORT_PATHS=1)
+      - "8767:8082"
     environment:
       # --seek-length=1: only read the first volume's header (faster on big sets)
       # -o warmup: read every archive's header in the background at startup, so
@@ -35,6 +37,8 @@ services:
       PLEX_URL: ${PLEX_URL:-}
       PLEX_TOKEN: ${PLEX_TOKEN:-}
       PLEX_PATH_MAP: ${PLEX_PATH_MAP:-}
+      # Whether Plex sees the short-names view: auto, 1 or 0 (see README).
+      PLEX_SHORT_NAMES: ${PLEX_SHORT_NAMES:-auto}
       # Fine-tuning: seconds between checks, seconds to wait after the last change,
       # and how many folder levels to watch.
       PLEX_POLL_SECONDS: "60"
@@ -53,12 +57,17 @@ services:
       TLS_HOSTS: ${TLS_HOSTS:-}
       # Wrong logins allowed in 10 seconds before new logins are refused for a while.
       LOGIN_GUESS_LIMIT: "5"
+      # Optional: a second view of the drive, on port 8767, where paths that are too
+      # long for Windows are shortened. Set SHORT_PATHS=1 in .env (see README).
+      SHORT_PATHS: ${SHORT_PATHS:-0}
+      # Longest path allowed in that view, counted from the drive root.
+      MAX_PATH: "230"
     volumes:
       # Extra logins: config/users.htpasswd (see README, "More logins")
       - "./config:/config:ro"
       # Status, event log and health report survive container rebuilds here
       - state:/state
-      # HTTPS certificate (only used when TLS=1)
+      # HTTPS certificate (created on first start; not used when TLS=0)
       - "./tls:/tls"
       # Each folder under /sources/<name> shows up as <drive>:\<name>
       # Format: "<Windows path, forward slashes>:/sources/<name>:ro"

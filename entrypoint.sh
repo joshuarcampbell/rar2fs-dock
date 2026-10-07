@@ -113,7 +113,28 @@ if [ -n "$PLEX_URL" ] && [ -n "$PLEX_TOKEN" ]; then
   /usr/local/bin/plex-refresh &
 fi
 
-# ---- the drive: HAProxy (:8080) in front of rclone (127.0.0.1:8079) ----
+# ---- optional: a second view where over-long paths are shortened (for Windows) ----
+# Served by its own rclone (127.0.0.1:8078), behind the same HAProxy as the normal drive.
+short_bind=""; short_use=""; short_backend=""
+if [ "${SHORT_PATHS:-0}" = "1" ]; then
+  shortfs /view /short --max-path "${MAX_PATH:-230}" &
+  tries=0
+  until mountpoint -q /short || [ "$tries" -ge 20 ]; do sleep 0.5; tries=$((tries + 1)); done
+  if mountpoint -q /short; then
+    mounted="/short $mounted"; echo "/short" >> "$EXPECTED"
+    echo "shortfs: /view -> /short (paths up to ${MAX_PATH:-230} characters)"
+    rclone serve webdav /short --addr 127.0.0.1:8078 --read-only --htpasswd "$HTPASSWD" \
+      --dir-cache-time "${DIR_CACHE_TIME:-15s}" --ignore-case "$@" $RCLONE_OPTS &
+    short_bind="bind :8082 $bind_opts"
+    short_use="use_backend rclone_short if { dst_port 8082 }"
+    short_backend="backend rclone_short
+    server rclone_short 127.0.0.1:8078"
+  else
+    echo "ERROR: the short-names view failed to start; the normal drive is unaffected"
+  fi
+fi
+
+# ---- the drive: HAProxy (:8080, and :8082 for the short-names view) in front of rclone ----
 # HAProxy handles HTTPS and slows down password guessing. rclone can't do the second
 # itself, so HAProxy watches its answers:
 #   - a login that has worked is remembered and always let through
@@ -136,6 +157,7 @@ backend st_good
     stick-table type string len 64 size 1k expire 12h store gpc0
 frontend drive
     bind :8080 $bind_opts
+    $short_bind
     acl has_auth req.hdr(Authorization) -m found
     http-request set-var(txn.auth) req.hdr(Authorization),sha2(256),hex if has_auth
     http-request track-sc0 str(all) table st_bad
@@ -145,9 +167,11 @@ frontend drive
     http-request deny deny_status 429 if has_auth !known_good too_many
     http-response sc-inc-gpc0(0) if { status 401 } { var(txn.auth) -m found }
     http-response sc-inc-gpc0(1) if { status lt 400 } { var(txn.auth) -m found }
+    $short_use
     default_backend rclone
 backend rclone
     server rclone 127.0.0.1:8079
+$short_backend
 HAPROXY
 haproxy -c -q -f /tmp/haproxy.cfg || { echo "ERROR: could not start the login throttle (HAProxy configuration)"; exit 1; }
 haproxy -f /tmp/haproxy.cfg -db &

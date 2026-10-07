@@ -1,0 +1,275 @@
+#!/usr/bin/env python3
+"""Read-only view of a folder in which no path is longer than a set limit.
+
+    shortfs <source> <mountpoint> [--max-path N]
+
+Windows programs often fail on paths longer than 260 characters. This shows the
+same files as <source>, but shortens names where a path would be too long.
+Names that fit are left exactly as they are, and nothing on disk is renamed.
+
+Folders are shortened before files, because the file name is what players and
+media libraries go by:
+
+    ...CHAMPIONSHIP.2026/WRC.FIA.WORLD.RALLY.CHAMPIONSHIP.2026.Rally.Chile.Bio.Bio.Highlights.1080p.WEB.H264-13/<file>
+ -> ...CHAMPIONSHIP.2026/Rally.Chile.Bio.Bio.Highlights.1080p~9a02/<file, unchanged>
+
+Rules (N = --max-path, counted from the drive root, so "Y:\\" is not included):
+  - A folder is shortened as far as the files directly inside it need to fit
+    within N (and down to 30 characters for files in its subfolders). The part
+    of its name that repeats its parent folder's name goes first, then the end
+    is cut. A 4-character tag keeps the result unique.
+  - A file is shortened only if its path is still over N after that. It keeps its
+    extension, and files that belong together (movie.mkv, movie.srt) keep
+    matching names.
+  - No name is cut below 12 characters.
+"""
+import argparse
+import errno
+import hashlib
+import os
+import threading
+import time
+
+try:
+    from fusepy import FUSE, FuseOSError, Operations    # Debian's package name
+except ImportError:
+    from fuse import FUSE, FuseOSError, Operations      # upstream name (pip)
+
+RESERVE = 60        # room kept below every folder, whatever is inside it
+MIN_NAME = 12       # never shorten a name below this
+ROOMY = 160        # a folder with this much room left is not inspected further
+SUBFOLDER = 20      # room assumed for a subfolder's own (possibly shortened) name
+READABLE = 30       # a folder is not cut below this just for files deeper down
+TTL = 15            # seconds a folder's name table is remembered
+SEPARATORS = ' ._-'
+
+
+def tag_for(text):
+    return '~' + hashlib.md5(text.encode('utf-8', 'surrogateescape')).hexdigest()[:4]
+
+
+def shorten_file(name, budget):
+    """Cut a file name to `budget` characters, keeping its extension."""
+    budget = max(budget, MIN_NAME)
+    if len(name) <= budget:
+        return name
+    ext = ''
+    dot = name.rfind('.')
+    if dot > 0 and len(name) - dot <= 9:
+        ext = name[dot:]
+    # The tag comes from the name without its extension, so files that belong
+    # together (movie.mkv, movie.srt, movie.nfo) still share the same shortened name.
+    tag = tag_for(name[:len(name) - len(ext)])
+    keep = max(budget - len(tag) - len(ext), 1)
+    return name[:keep].rstrip(' .') + tag + ext
+
+
+def without_parent_prefix(name, parent):
+    """Drop the start of `name` that just repeats the parent folder's name."""
+    limit = min(len(name), len(parent))
+    i = 0
+    while i < limit and name[i].lower() == parent[i].lower():
+        i += 1
+    # back up to a word boundary, so a word is never cut in half
+    while 0 < i < len(name) and name[i] not in SEPARATORS and name[i - 1] not in SEPARATORS:
+        i -= 1
+    rest = name[i:].lstrip(SEPARATORS)
+    if i >= 8 and len(rest) >= 8:
+        return rest
+    return name
+
+
+def shorten_folder(name, budget, parent):
+    """Cut a folder name to `budget` characters."""
+    budget = max(budget, MIN_NAME)
+    if len(name) <= budget:
+        return name
+    tag = tag_for(name)
+    keep = max(budget - len(tag), 1)
+    return without_parent_prefix(name, parent)[:keep].rstrip(SEPARATORS) + tag
+
+
+class ShortFS(Operations):
+    def __init__(self, root, max_path):
+        self.root = root.rstrip('/')
+        self.max_path = max_path
+        self.cache = {}             # shown folder path -> (expires, {shown name: real name})
+        self.needs = {}             # real folder path -> (expires, room its contents need)
+        self.lock = threading.Lock()
+
+    # ---- name mapping ----
+
+    def _room_needed(self, real_dir, depth=1):
+        """Characters that must stay free below a folder for the names inside it,
+        as (its longest file name, a subfolder plus that subfolder's longest file)."""
+        now = time.monotonic()
+        with self.lock:
+            hit = self.needs.get(real_dir)
+            if hit and hit[0] > now:
+                return hit[1]
+        need = 0
+        deeper = 0
+        subfolders = []
+        try:
+            with os.scandir(real_dir) as entries:
+                for entry in entries:
+                    try:
+                        is_dir = entry.is_dir()
+                    except OSError:
+                        is_dir = False
+                    if is_dir:
+                        subfolders.append(entry.name)
+                    else:
+                        need = max(need, len(entry.name))
+        except OSError:
+            pass
+        if depth > 0:
+            for sub in subfolders[:50]:
+                below = self._room_needed(real_dir + '/' + sub, depth - 1)[0]
+                if below:
+                    deeper = max(deeper, min(len(sub), SUBFOLDER) + 1 + below)
+        with self.lock:
+            if len(self.needs) > 50000:
+                self.needs.clear()
+            self.needs[real_dir] = (now + TTL, (need, deeper))
+        return need, deeper
+
+    def _table(self, shown_dir, real_dir):
+        """{shown name: real name} for one folder."""
+        now = time.monotonic()
+        with self.lock:
+            hit = self.cache.get(shown_dir)
+            if hit and hit[0] > now:
+                return hit[1]
+        used = len(shown_dir.strip('/'))
+        used += 1 if used else 0    # the separator before the child's name
+        parent = os.path.basename(real_dir) if real_dir != self.root else ''
+        table = {}
+        with os.scandir(real_dir) as entries:
+            for entry in entries:
+                name = entry.name
+                try:
+                    is_dir = entry.is_dir()
+                except OSError:
+                    is_dir = False
+                if is_dir:
+                    budget = self.max_path - RESERVE - used
+                    if used + len(name) > self.max_path - 1 - ROOMY:
+                        # tight: leave exactly the room this folder's own files need,
+                        # and what deeper files need as long as it stays readable
+                        need, deeper = self._room_needed(real_dir + '/' + name)
+                        budget = min(budget, self.max_path - 1 - need - used)
+                        budget = min(budget, max(self.max_path - 1 - deeper - used, READABLE))
+                    shown = shorten_folder(name, budget, parent)
+                else:
+                    shown = shorten_file(name, self.max_path - used)
+                while shown in table:           # tag clash - vanishingly rare
+                    shown += '_'
+                table[shown] = name
+        with self.lock:
+            if len(self.cache) > 20000:
+                self.cache.clear()
+            self.cache[shown_dir] = (now + TTL, table)
+        return table
+
+    def _real(self, path):
+        """Real path on disk for a path as shown in this view."""
+        real = self.root
+        shown = ''
+        for part in path.strip('/').split('/'):
+            if not part:
+                continue
+            if '~' in part:
+                # only shortened names carry a tag, so only they need looking up
+                part_real = self._table(shown or '/', real).get(part, part)
+            else:
+                part_real = part
+            real = real + '/' + part_real
+            shown = shown + '/' + part
+        return real
+
+    # ---- filesystem operations (read-only) ----
+
+    def getattr(self, path, fh=None):
+        try:
+            st = os.lstat(self._real(path))
+        except OSError as e:
+            raise FuseOSError(e.errno)
+        return {key: getattr(st, key) for key in (
+            'st_atime', 'st_ctime', 'st_gid', 'st_mode', 'st_mtime', 'st_nlink', 'st_size', 'st_uid')}
+
+    def readdir(self, path, fh):
+        try:
+            names = list(self._table(path, self._real(path)))
+        except OSError as e:
+            raise FuseOSError(e.errno)
+        return ['.', '..'] + names
+
+    def readlink(self, path):
+        try:
+            return os.readlink(self._real(path))
+        except OSError as e:
+            raise FuseOSError(e.errno)
+
+    def open(self, path, flags):
+        if flags & (os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC):
+            raise FuseOSError(errno.EROFS)
+        try:
+            return os.open(self._real(path), os.O_RDONLY)
+        except OSError as e:
+            raise FuseOSError(e.errno)
+
+    def read(self, path, size, offset, fh):
+        try:
+            return os.pread(fh, size, offset)
+        except OSError as e:
+            raise FuseOSError(e.errno)
+
+    def release(self, path, fh):
+        os.close(fh)
+        return 0
+
+    def statfs(self, path):
+        st = os.statvfs(self.root)
+        return {key: getattr(st, key) for key in (
+            'f_bavail', 'f_bfree', 'f_blocks', 'f_bsize', 'f_favail', 'f_ffree', 'f_files', 'f_frsize', 'f_namemax')}
+
+
+def shown_path(fs, real_rel):
+    """How a real path (relative to the source) is named in the view."""
+    real = fs.root
+    shown = ''
+    for part in real_rel.strip('/').split('/'):
+        if not part:
+            continue
+        try:
+            table = fs._table(shown or '/', real)
+        except OSError:
+            table = {}
+        name = next((s for s, r in table.items() if r == part), part)
+        real = real + '/' + part
+        shown = shown + '/' + name
+    return shown.lstrip('/')
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Read-only view with shortened paths.')
+    parser.add_argument('source')
+    parser.add_argument('mountpoint', nargs='?')
+    parser.add_argument('--max-path', type=int, default=230)
+    parser.add_argument('--show', metavar='PATH',
+                        help='print how PATH (relative to source) is named in the view, then exit')
+    args = parser.parse_args()
+    if args.max_path < RESERVE + 2 * MIN_NAME:
+        parser.error('--max-path must be at least %d' % (RESERVE + 2 * MIN_NAME))
+    if args.show is not None:
+        print(shown_path(ShortFS(args.source, args.max_path), args.show))
+        return
+    if not args.mountpoint:
+        parser.error('mountpoint is required')
+    FUSE(ShortFS(args.source, args.max_path), args.mountpoint, foreground=True, ro=True,
+         allow_other=True, entry_timeout=TTL, attr_timeout=TTL, negative_timeout=2)
+
+
+if __name__ == '__main__':
+    main()

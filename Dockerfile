@@ -31,7 +31,7 @@ ARG UNRAR_VERSION
 ARG RAR2FS_VERSION
 ENV UNRAR_VERSION=${UNRAR_VERSION} RAR2FS_VERSION=${RAR2FS_VERSION}
 RUN apt-get update \
- && apt-get install -y --no-install-recommends fuse libfuse2 mergerfs rclone ca-certificates tini curl jq apache2-utils openssl python3 haproxy \
+ && apt-get install -y --no-install-recommends fuse libfuse2 mergerfs rclone ca-certificates tini curl jq apache2-utils openssl python3 python3-fusepy haproxy \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=build /usr/lib/libunrar.so /usr/lib/
 COPY --from=build /usr/local/bin/rar2fs /usr/local/bin/
@@ -46,10 +46,10 @@ RUN chmod +x /entrypoint.sh /usr/local/bin/* && ldconfig && rar2fs --version \
  && chmod u+s /usr/bin/mergerfs-fusermount \
  && find / -xdev -type f -perm /6000 ! -name fusermount ! -name mergerfs-fusermount -exec chmod a-s {} + \
  && echo user_allow_other >> /etc/fuse.conf \
- && mkdir -p /view /merged /pass1 /state /tls && chown rar2fs:rar2fs /view /merged /pass1 /state /tls
+ && mkdir -p /view /merged /pass1 /short /state /tls && chown rar2fs:rar2fs /view /merged /pass1 /short /state /tls
 USER rar2fs
 
 HEALTHCHECK --interval=60s --timeout=20s --start-period=60s --retries=3 CMD ["/usr/local/bin/healthcheck"]
 
-EXPOSE 8080 8081
+EXPOSE 8080 8081 8082
 ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]

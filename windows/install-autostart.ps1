@@ -4,13 +4,15 @@ param(
     [string]$Drive = "Y:",
     [string]$Url = "",   # default: chosen by mount.ps1 from ..\.env
     [string]$User = "",
-    [string]$Pass = ""
+    [string]$Pass = "",
+    [switch]$Original    # use the full-length names even when SHORT_PATHS=1 in ..\.env
 )
 
 $TaskName = "rar2fs-dock mount"
 $script = Join-Path $PSScriptRoot "mount.ps1"
 $argList = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$script`" -Drive $Drive"
 if ($Url) { $argList += " -Url $Url" }
+if ($Original) { $argList += " -Original" }
 if ($User) { $argList += " -User `"$User`" -Pass `"$Pass`"" }
 
 $action   = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $argList

@@ -2,12 +2,18 @@
 # Runs in the foreground; close the window (or Ctrl+C) to unmount.
 param(
     [string]$Drive = "Y:",
-    [string]$Url = "",   # default: http(s)://localhost:8765, depending on TLS in ..\.env
+    [string]$Url = "",   # default: this PC's server, chosen from the settings in ..\.env
     [string]$User = "",
-    [string]$Pass = ""
+    [string]$Pass = "",
+    [switch]$Original    # use the full-length names even when SHORT_PATHS=1 in ..\.env
 )
 
 $rclone = (Get-Command rclone -ErrorAction SilentlyContinue).Source
+if (-not $rclone) {
+    # Just installed with winget? It isn't on PATH until a new window is opened.
+    $wingetLink = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\rclone.exe"
+    if (Test-Path $wingetLink) { $rclone = $wingetLink }
+}
 if (-not $rclone) {
     Write-Error "rclone not found. Install it with: winget install Rclone.Rclone"
     exit 1
@@ -25,18 +31,26 @@ if ($running) {
         "letters, run .\windows\uninstall-autostart.ps1 then .\windows\install-autostart.ps1 -Drive $Drive")
 }
 
-# Settings shared with the container (..\.env): login, and whether HTTPS is on
+# Settings shared with the container (..\.env): login, HTTPS, and the short-names view
 $envFile = Join-Path $PSScriptRoot "..\.env"
-$envUser = ""; $envPass = ""; $tls = $true    # HTTPS unless .env says TLS=0
+$envUser = ""; $envPass = ""
+$tls = $true       # HTTPS unless .env says TLS=0
+$short = $false    # full names unless .env says SHORT_PATHS=1
 if (Test-Path $envFile) {
     foreach ($line in Get-Content $envFile) {
         if ($line -match '^\s*WEBDAV_USER\s*=\s*(.*)$') { $envUser = $Matches[1].Trim() }
         if ($line -match '^\s*WEBDAV_PASS\s*=\s*(.*)$') { $envPass = $Matches[1].Trim() }
         if ($line -match '^\s*TLS\s*=\s*0\s*$') { $tls = $false }
+        if ($line -match '^\s*SHORT_PATHS\s*=\s*1\s*$') { $short = $true }
     }
 }
 if (-not $User) { $User = $envUser; $Pass = $envPass }
-if (-not $Url) { $Url = if ($tls) { "https://localhost:8765" } else { "http://localhost:8765" } }
+if (-not $Url) {
+    # 8765 = full names; 8767 = names shortened to fit Windows' path limit
+    $scheme = if ($tls) { "https" } else { "http" }
+    $port = if ($short -and -not $Original) { 8767 } else { 8765 }
+    $Url = "${scheme}://localhost:$port"
+}
 
 $rcloneArgs = @(
     "mount", ":webdav:", $Drive,

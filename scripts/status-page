@@ -126,6 +126,7 @@ cat <<HTML
 <tr><td>Notifications</td><td>$( [ -n "$NOTIFY_URL" ] && echo on || echo 'off (no NOTIFY_URL)')</td></tr>
 <tr><td>Automatic restart</td><td>$( [ "${AUTO_RESTART:-1}" = 1 ] && echo on || echo off)</td></tr>
 <tr><td>Archives inside archives</td><td>$( [ "${NESTED_RAR:-1}" = 1 ] && echo on || echo off)</td></tr>
+<tr><td>Short names view</td><td>$( [ "${SHORT_PATHS:-0}" = 1 ] && echo "on · port 8767 · paths up to ${MAX_PATH:-230} characters" || echo off)</td></tr>
 <tr><td>HTTPS</td><td>$( [ "${TLS:-1}" = 1 ] && echo on || echo off)</td></tr>
 <tr><td>Logins</td><td>$(cut -d: -f1 /tmp/htpasswd 2>/dev/null | esc | tr '\n' ' ')</td></tr>
 <tr><td>Hidden</td><td><code>$(printf '%s' "${HIDE-default}" | esc)</code></td></tr>
