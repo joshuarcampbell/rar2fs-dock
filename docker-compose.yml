@@ -14,14 +14,14 @@ services:
     # Docker Desktop on Windows and Mac doesn't use AppArmor, so there it changes nothing.
     security_opt: ["apparmor:${APPARMOR_PROFILE:-unconfined}"]
     ports:
-      # All are reachable from your network, behind the logins. To limit them to this
-      # PC, put 127.0.0.1: in front of each, e.g. "127.0.0.1:8765:8080".
+      # All are reachable from your network by default, behind the logins.
+      # Set BIND=127.0.0.1 in .env to limit them to this PC.
       # The drive (WebDAV):
-      - "8765:8080"
+      - "${BIND:-0.0.0.0}:8765:8080"
       # Status page: https://localhost:8766/status.html
-      - "8766:8081"
+      - "${BIND:-0.0.0.0}:8766:8081"
       # Short-names view of the drive (only answers when SHORT_PATHS=1)
-      - "8767:8082"
+      - "${BIND:-0.0.0.0}:8767:8082"
     environment:
       # --seek-length=1: only read the first volume's header (faster on big sets)
       # -o warmup: read every archive's header in the background at startup, so
@@ -46,6 +46,11 @@ services:
       PLEX_WATCH_DEPTH: "4"
       # Optional: where to send alerts (ntfy topic, Discord or Slack webhook). Set in .env.
       NOTIFY_URL: ${NOTIFY_URL:-}
+      # Optional, for monitoring apps (see README, "Dashboards and monitoring"):
+      # a URL to ping every minute while healthy, and a read-only token for
+      # status.json and /metrics. Both set in .env.
+      HEARTBEAT_URL: ${HEARTBEAT_URL:-}
+      STATUS_TOKEN: ${STATUS_TOKEN:-}
       # Restart automatically after 3 failed health checks in a row. 0 = off.
       AUTO_RESTART: "1"
       # Run the health report every N days and alert on new problems. 0 = never.
@@ -69,48 +74,9 @@ services:
       - state:/state
       # HTTPS certificate (created on first start; not used when TLS=0)
       - "./tls:/tls"
-      # Each folder under /sources/<name> shows up as <drive>:\<name>
-      # Format: "<Windows path, forward slashes>:/sources/<name>:ro"
-      #
-      # Local drives/folders, e.g. E:\tv -> Y:\tv
-      # - "E:/tv:/sources/tv:ro"
-      # - "D:/Downloads:/sources/downloads:ro"
-      #
-      # Subfolders inside one folder: mount at /sources/<name>/<sub>
-      # -> Y:\tv\tv-1, tv-2
-      - "F:/tv:/sources/tv/tv-1:ro"
-      - "E:/tv:/sources/tv/tv-2:ro"
-      # -> Y:\films\films-1, films-2, films-3
-      - "I:/x264:/sources/films/films-1:ro"
-      - "F:/Movies 2:/sources/films/films-2:ro"
-      - "E:/films-3:/sources/films/films-3:ro"
-      # Merge several folders into one: name them <name>@<anything>.
-      # H:\Training and H:\Training-2 both show up together in Y:\training
-      - "H:/Training:/sources/training@1:ro"
-      - "H:/Training-2:/sources/training@2:ro"
-      # Single folders
-      - "H:/Software:/sources/software:ro"
-      - "H:/FLAC:/sources/flac:ro"
-      - "H:/Games:/sources/games:ro"
-      - "H:/New-MP3:/sources/mp3:ro"
-      # Network shares (defined at the bottom) work the same way:
-      # -> Y:\tv\tv-3
-      #- nas-tv:/sources/tv/tv-3:ro
-
-# Network shares - must start at the left margin, not inside "services:".
-# One entry per NAS folder; point "device" straight at the folder you want.
-# Credentials come from .env (NAS_USER / NAS_PASS).
-#x-nas-options: &nas-options
-#  type: cifs
-#  o: "username=${NAS_USER:?set NAS_USER in .env},password=${NAS_PASS:?set NAS_PASS in .env},vers=3.0,iocharset=utf8,ro,uid=1000,gid=1000"
+      # Your media folders are not listed here. They go in docker-compose.override.yml,
+      # which Docker merges with this file automatically. Run windows\setup.ps1 to
+      # create it, or copy docker-compose.override.example.yml and edit it.
 
 volumes:
   state:
-#  nas-tv:
-#    driver_opts:
-#      <<: *nas-options
-#      device: "//qnap-nas-02.foobarstudios.com/storage/TV"
-  # nas-films:
-  #   driver_opts:
-  #     <<: *nas-options
-  #     device: "//<nas-host>/<share>/<folder>"

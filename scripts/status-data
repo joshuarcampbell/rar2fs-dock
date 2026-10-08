@@ -1,0 +1,134 @@
+#!/bin/sh
+# Writes the status page's data in two machine-readable forms, for dashboards and
+# monitoring apps:
+#
+#   /state/www/status.json   everything, as JSON        -> https://<pc>:8766/status.json
+#   /state/www/metrics.txt   the numbers, for Prometheus -> https://<pc>:8766/metrics
+#
+# Called by status-page, so all three are rebuilt together.
+www=/state/www
+mkdir -p "$www"
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+val() { sed -n "s/^$1=//p" /state/versions 2>/dev/null; }
+newer() { [ -n "$1" ] && [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ]; }
+num() { case "$1" in ''|*[!0-9]*) echo null ;; *) echo "$1" ;; esac; }
+
+health=$(cut -f1 /state/health 2>/dev/null); detail=$(cut -s -f2- /state/health 2>/dev/null)
+[ -n "$health" ] || health=starting
+
+# ---- folders ----
+: > "$tmp/folders"
+for name in $(sed -n 's|^/view/||p' /tmp/mounts.expected 2>/dev/null); do
+  if ls "/view/$name" > /dev/null 2>&1; then mounted=true; items=$(ls -1A "/view/$name" 2>/dev/null | wc -l); else mounted=false; items=0; fi
+  jq -n --arg name "$name" --argjson mounted "$mounted" --argjson items "$items" \
+    '{name: $name, mounted: $mounted, items: $items}' >> "$tmp/folders"
+done
+
+# ---- versions ----
+unrar_latest=$(val unrar_latest); rar2fs_latest=$(val rar2fs_latest)
+if newer "$unrar_latest" "$UNRAR_VERSION"; then unrar_update=true; else unrar_update=false; fi
+if newer "$rar2fs_latest" "$RAR2FS_VERSION"; then rar2fs_update=true; else rar2fs_update=false; fi
+
+# ---- health report ----
+report=$www/health-report.txt
+count() { sed -n "s/^== $1: \([0-9][0-9]*\)$/\1/p" "$report" 2>/dev/null | head -1; }
+if [ -f "$report" ]; then
+  r_scope=$(sed -n '1s/^Health report for: //p' "$report"); r_finished=$(stat -c %Y "$report")
+else
+  r_scope=""; r_finished=""
+fi
+if [ -f /state/report.running ]; then r_running=true; else r_running=false; fi
+restarts=$(awk -v t="$(( $(date +%s) - 3600 ))" '$1 > t' /state/restarts 2>/dev/null | wc -l)
+
+# ---- recent events ----
+: > "$tmp/events"
+if [ -s /state/events.log ]; then
+  tail -n 10 /state/events.log | while IFS="$(printf '\t')" read -r t title msg; do
+    jq -n --argjson time "$(num "$t")" --arg title "$title" --arg detail "$msg" \
+      '{time: $time, title: $title, detail: $detail}' >> "$tmp/events"
+  done
+fi
+
+on() { [ "$1" = "$2" ] && echo true || echo false; }
+if [ -n "$PLEX_URL" ] && [ -n "$PLEX_TOKEN" ]; then plex=true; else plex=false; fi
+if [ -n "$NOTIFY_URL" ]; then notify=true; else notify=false; fi
+
+jq -n \
+  --arg health "$health" --arg detail "$detail" \
+  --argjson generated "$(date +%s)" --argjson started "$(num "$(cat /state/started 2>/dev/null)")" \
+  --slurpfile folders "$tmp/folders" --slurpfile events "$tmp/events" \
+  --arg unrar "$UNRAR_VERSION" --arg unrar_latest "$unrar_latest" --argjson unrar_update "$unrar_update" \
+  --arg rar2fs "$RAR2FS_VERSION" --arg rar2fs_latest "$rar2fs_latest" --argjson rar2fs_update "$rar2fs_update" \
+  --argjson r_running "$r_running" --arg r_scope "$r_scope" --argjson r_finished "$(num "$r_finished")" \
+  --argjson c_empty "$(num "$(count 'Empty folders')")" \
+  --argjson c_missing "$(num "$(count 'RAR sets with missing parts')")" \
+  --argjson c_orphan "$(num "$(count 'RAR parts with no main .rar file')")" \
+  --argjson c_unreadable "$(num "$(count 'Folders with archives that could not be opened')")" \
+  --argjson restarts "$restarts" \
+  --argjson https "$(on "${TLS:-1}" 1)" --argjson short "$(on "${SHORT_PATHS:-0}" 1)" \
+  --argjson auto_restart "$(on "${AUTO_RESTART:-1}" 1)" --argjson plex "$plex" --argjson notify "$notify" '
+  {empty_folders: $c_empty, missing_parts: $c_missing, orphan_parts: $c_orphan, unreadable: $c_unreadable} as $counts
+  | {
+      health: $health,
+      healthy: ($health == "healthy"),
+      detail: $detail,
+      generated: $generated,
+      started: $started,
+      folders_total: ($folders | length),
+      folders_mounted: ($folders | map(select(.mounted)) | length),
+      updates_available: ([$unrar_update, $rar2fs_update] | map(select(.)) | length),
+      report_problems: (if $r_finished == null then null else ($counts | map(. // 0) | add) end),
+      restarts_last_hour: $restarts,
+      folders: $folders,
+      versions: {
+        unrar:  {installed: $unrar,  latest: (if $unrar_latest  == "" then null else $unrar_latest  end), update_available: $unrar_update},
+        rar2fs: {installed: $rar2fs, latest: (if $rar2fs_latest == "" then null else $rar2fs_latest end), update_available: $rar2fs_update}
+      },
+      report: {running: $r_running, scope: (if $r_scope == "" then null else $r_scope end), finished: $r_finished, counts: $counts},
+      settings: {https: $https, short_names: $short, auto_restart: $auto_restart, plex_refresh: $plex, notifications: $notify},
+      events: ($events | reverse)
+    }' > "$tmp/status.json" || exit 1
+mv "$tmp/status.json" "$www/status.json"
+
+# ---- Prometheus metrics, derived from the same JSON ----
+jq -r '
+  def esc: gsub("\\\\"; "\\\\") | gsub("\""; "\\\"") | gsub("\n"; " ");
+  def b: if . then 1 else 0 end;
+  "# HELP rar2fs_dock_healthy 1 if every mount and the drive server answer, else 0.",
+  "# TYPE rar2fs_dock_healthy gauge",
+  "rar2fs_dock_healthy \(.healthy | b)",
+  "# HELP rar2fs_dock_folders Number of folders the container serves.",
+  "# TYPE rar2fs_dock_folders gauge",
+  "rar2fs_dock_folders \(.folders_total)",
+  "# HELP rar2fs_dock_folder_mounted 1 if the folder is mounted and answering, else 0.",
+  "# TYPE rar2fs_dock_folder_mounted gauge",
+  (.folders[] | "rar2fs_dock_folder_mounted{folder=\"\(.name | esc)\"} \(.mounted | b)"),
+  "# HELP rar2fs_dock_folder_items Entries at the top level of the folder.",
+  "# TYPE rar2fs_dock_folder_items gauge",
+  (.folders[] | "rar2fs_dock_folder_items{folder=\"\(.name | esc)\"} \(.items)"),
+  "# HELP rar2fs_dock_update_available 1 if a newer release of the component exists.",
+  "# TYPE rar2fs_dock_update_available gauge",
+  (.versions | to_entries[] | "rar2fs_dock_update_available{component=\"\(.key)\"} \(.value.update_available | b)"),
+  "# HELP rar2fs_dock_report_running 1 while a health report is running.",
+  "# TYPE rar2fs_dock_report_running gauge",
+  "rar2fs_dock_report_running \(.report.running | b)",
+  (if .report.finished == null then empty else
+    "# HELP rar2fs_dock_report_finished_timestamp_seconds When the last health report finished.",
+    "# TYPE rar2fs_dock_report_finished_timestamp_seconds gauge",
+    "rar2fs_dock_report_finished_timestamp_seconds \(.report.finished)",
+    "# HELP rar2fs_dock_report_problems Problems found by the last health report, by kind.",
+    "# TYPE rar2fs_dock_report_problems gauge",
+    (.report.counts | to_entries[] | "rar2fs_dock_report_problems{kind=\"\(.key)\"} \(.value // 0)")
+  end),
+  "# HELP rar2fs_dock_restarts_last_hour Automatic restarts in the last hour.",
+  "# TYPE rar2fs_dock_restarts_last_hour gauge",
+  "rar2fs_dock_restarts_last_hour \(.restarts_last_hour)",
+  (if .started == null then empty else
+    "# HELP rar2fs_dock_started_timestamp_seconds When the container last started.",
+    "# TYPE rar2fs_dock_started_timestamp_seconds gauge",
+    "rar2fs_dock_started_timestamp_seconds \(.started)"
+  end),
+  "# HELP rar2fs_dock_generated_timestamp_seconds When these numbers were produced.",
+  "# TYPE rar2fs_dock_generated_timestamp_seconds gauge",
+  "rar2fs_dock_generated_timestamp_seconds \(.generated)"
+' "$www/status.json" > "$tmp/metrics.txt" && mv "$tmp/metrics.txt" "$www/metrics.txt"

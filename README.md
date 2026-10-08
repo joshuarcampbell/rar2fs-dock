@@ -33,15 +33,46 @@ After installing rclone, open a **new** PowerShell window so it's on your PATH.
 
 ## Setup
 
+### Quick way: the setup wizard
+
+Install Docker Desktop and start it, then open PowerShell in this folder and run:
+
+```powershell
+.\windows\setup.ps1
+```
+
+It does the rest:
+
+1. Installs WinFsp and rclone if they're missing.
+2. Asks which folders hold your media and what each should be called on the drive.
+   Folders on a NAS drive letter work too - it sets those up as network shares and
+   asks for the NAS login.
+3. Asks whether other devices will connect, and whether to shorten over-long folder
+   names.
+4. Writes `.env` (with a random password) and `docker-compose.override.yml` (your
+   folders).
+5. Builds and starts the container. The first build takes several minutes.
+6. Mounts the drive and makes it come back at every login.
+
+It's safe to run again: it never overwrites an existing `.env`, and keeps your folder
+list unless you add `-Force`. Everything can also be given up front, with no
+questions:
+
+```powershell
+.\windows\setup.ps1 -Yes -Folder "D:\Movies=movies","E:\TV=tv" -Drive R:
+```
+
+If PowerShell refuses to run the script, run this first:
+`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
+
+The numbered steps below do the same thing by hand, and explain each part.
+
 ### 1. Choose your source folders
 
-Edit `docker-compose.yml`. Every volume mounted at `/sources/<name>` shows up as
-`Y:\<name>`.
-
-**The file comes with the author's own folders in it** (`F:/tv`, `H:/Games` and so
-on) under `volumes:`. Delete those lines and add your own. Keep the three lines
-above them - `./config:/config:ro`, `state:/state` and `./tls:/tls` - which the
-container needs for logins, the status page and HTTPS.
+Your folders go in a file of your own, `docker-compose.override.yml`. Docker merges
+it with `docker-compose.yml` automatically, and it's gitignored, so pulling updates
+never touches it. Copy `docker-compose.override.example.yml` to that name and edit
+it. Every volume mounted at `/sources/<name>` shows up as `Y:\<name>`.
 
 **Local folder or drive:**
 
@@ -76,22 +107,25 @@ folder exists in more than one source, the folders' contents are combined, and f
 file, the first source alphabetically by label wins.
 
 **Network share (SMB/CIFS):** Docker can't see drive letters that Windows has mapped
-to a NAS, so a share is connected by its network address instead. Three steps, all in
-`docker-compose.yml`:
+to a NAS, so a share is connected by its network address instead. In
+`docker-compose.override.yml`:
 
-1. Near the bottom, remove the `#` from the three `x-nas-options` lines. They hold
-   the settings every share uses.
-2. Under the `volumes:` line at the very bottom (the one at the left margin, which
-   already lists `state:`), add one entry per NAS folder:
+1. At the bottom, remove the `#` from the `x-nas-options` lines and from the
+   `volumes:` block under them, and set `device` to the folder you want. One entry
+   per NAS folder:
    ```yaml
+   x-nas-options: &nas-options
+     type: cifs
+     o: "username=${NAS_USER:?set NAS_USER in .env},password=${NAS_PASS:?set NAS_PASS in .env},vers=3.0,iocharset=utf8,ro,uid=1000,gid=1000"
+
    volumes:
-     state:
      nas-tv:
        driver_opts:
          <<: *nas-options
          device: "//nas.example.com/share/TV"  # point straight at the folder you want
    ```
-3. Mount it with your other folders, like any other source. It can go anywhere,
+   These start at the left margin, not indented under `services:`.
+2. Mount it with your other folders, like any other source. It can go anywhere,
    including inside a subfolder group:
    ```yaml
          - nas-tv:/sources/tv/tv-3:ro          # -> Y:\tv\tv-3
@@ -146,6 +180,11 @@ made the certificate itself (see [HTTPS](#https)). Choose *Advanced* → *Procee
 
 Both accept `-Drive X:` to use a different letter. `Y:` is the default. They log in
 with the user and password from `.env` automatically.
+
+The drive letter only appears once the container is answering. After a restart Windows
+logs in before Docker is ready, and this way programs that start at login - Plex, for
+one - never find an empty drive. If the drive doesn't appear, run `.\windows\mount.ps1`
+in a window to see what it's waiting for.
 
 If PowerShell refuses to run the scripts, run this first:
 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
@@ -208,7 +247,8 @@ Things to know:
   installation does. If you've set Plex up to run as a Windows service under another
   account, it won't see the drive letter.
 - **Docker Desktop has to be running.** Turn on Docker Desktop → Settings → General →
-  *Start Docker Desktop when you sign in*.
+  *Start Docker Desktop when you sign in*. The drive letter only appears once the
+  container is answering, so Plex never scans an empty drive at start-up.
 - **New files appear at Plex's next scan.** Plex can't detect changes on this drive
   by itself. Either use *Scan Library Files* / Settings → Library → *Scan my library
   periodically*, or let the container tell Plex the moment something changes - see
@@ -273,8 +313,8 @@ The steps below do the same thing by hand.
 
 ### 1. Open the server to your network (Windows PC)
 
-In `docker-compose.yml`, the port line must be `"8765:8080"`, not
-`"127.0.0.1:8765:8080"`. Then allow the ports through Windows Firewall from an
+Make sure `.env` has no `BIND=127.0.0.1` line - the setup wizard adds one if you said
+no other devices would connect. Then allow the ports through Windows Firewall from an
 **admin** PowerShell (8765 is the drive, 8766 the status page, 8767 the short-names view):
 
 ```powershell
@@ -448,7 +488,7 @@ Windows, so set the PC to log in automatically, or keep it logged in.
 
 | To... | Run |
 |---|---|
-| Add or remove a source | Edit `docker-compose.yml`, then `docker compose up -d` |
+| Add or remove a source | Edit `docker-compose.override.yml`, then `docker compose up -d` |
 | Change a setting | Edit `.env` or `docker-compose.yml` (see [Settings](#settings)), then `docker compose up -d` |
 | See what it's doing | Open <https://localhost:8766/status.html> |
 | Check your folders for problems | The **Run health report** button on that page |
@@ -553,6 +593,114 @@ docker exec rar2fs notify "Test" "Hello from rar2fs-dock"
 
 If the address is wrong or unreachable, the command prints
 `notify: could not deliver to NOTIFY_URL`.
+
+### Dashboards and monitoring
+
+The status page's information is also available in forms other programs can read, on
+the same port and with the same login:
+
+| Address | What | For |
+|---|---|---|
+| `https://<pc>:8766/status.json` | Everything on the status page, as JSON | Homepage, Home Assistant, Uptime Kuma, any dashboard with a JSON widget |
+| `https://<pc>:8766/metrics` | The numbers, in Prometheus format | Prometheus and Grafana |
+
+**Logging in.** Both accept the usual user name and password. For apps that can't send
+those, set a token in `.env` and add it to the address:
+
+```ini
+STATUS_TOKEN=pick-a-long-random-string
+```
+
+`https://<pc>:8766/status.json?token=pick-a-long-random-string`
+
+The token can only read those two addresses.
+
+**The certificate.** With HTTPS on, the app has to accept the container's self-signed
+certificate. Most have a switch for it ("ignore TLS errors", `verify_ssl: false`), or
+can be given `tls\cert.pem` to trust.
+
+**A heartbeat, for when the whole PC is down.** Everything above stops answering if
+this PC is off or Docker isn't running, and nothing inside the container can tell you
+that. A heartbeat turns it around: the container pings an outside service every minute
+while it's healthy, and that service alerts you when the pings stop.
+
+```ini
+HEARTBEAT_URL=https://uptime.example.com/api/push/abc123?status=up&msg=OK
+```
+
+- **Uptime Kuma:** add a monitor of type *Push*, set its heartbeat interval to 60
+  seconds, and copy the push URL it shows.
+- **Healthchecks.io:** create a check with a 1-minute period and copy its ping URL
+  (`https://hc-ping.com/...`).
+
+With either of those, an unhealthy container also reports "down" straight away, with
+the reason. Any other URL is simply fetched once a minute while healthy.
+
+**Examples.** Replace the address and token with your own.
+
+*Homepage* (`services.yaml`) - up to four fields:
+
+```yaml
+- rar2fs-dock:
+    href: https://192.168.1.63:8766/status.html
+    widget:
+      type: customapi
+      url: https://192.168.1.63:8766/status.json?token=YOUR_TOKEN
+      refreshInterval: 60000
+      mappings:
+        - field: health
+          label: Status
+        - field: folders_mounted
+          label: Folders up
+        - field: updates_available
+          label: Updates
+        - field: report_problems
+          label: Problems
+```
+
+Homepage checks certificates; give it the container's by setting
+`NODE_EXTRA_CA_CERTS` to a copy of `cert.pem` in Homepage's own container.
+
+*Uptime Kuma* - besides the push monitor above, an *HTTP(s) - Keyword* monitor on
+`https://192.168.1.63:8766/status.json?token=YOUR_TOKEN` with the keyword
+`"healthy": true` and *Ignore TLS/SSL errors* switched on.
+
+*Prometheus* (`prometheus.yml`):
+
+```yaml
+scrape_configs:
+  - job_name: rar2fs-dock
+    scheme: https
+    metrics_path: /metrics
+    params:
+      token: [YOUR_TOKEN]
+    tls_config:
+      ca_file: /etc/prometheus/rar2fs-cert.pem   # a copy of tls\cert.pem
+    static_configs:
+      - targets: ["192.168.1.63:8766"]
+```
+
+*Home Assistant* (`configuration.yaml`):
+
+```yaml
+sensor:
+  - platform: rest
+    name: rar2fs-dock
+    resource: https://192.168.1.63:8766/status.json?token=YOUR_TOKEN
+    value_template: "{{ value_json.health }}"
+    json_attributes:
+      - folders_mounted
+      - folders_total
+      - updates_available
+      - report_problems
+    verify_ssl: false
+    scan_interval: 60
+```
+
+Fields in `status.json`: `health` (`healthy`, `unhealthy` or `starting`), `healthy`
+(true/false), `detail` (which check failed), `folders_total`, `folders_mounted`,
+`updates_available`, `report_problems`, `restarts_last_hour`, and the full lists under
+`folders`, `versions`, `report`, `settings` and `events`.
 
 ### Updates for unrar and rar2fs
 
@@ -764,7 +912,10 @@ Settings live in two files. After changing either, run `docker compose up -d`.
 | `TLS_HOSTS` | Addresses or names other devices use to reach this PC, for the [HTTPS](#https) certificate | this PC only |
 | `TLS` | `0` turns [HTTPS](#https) off | `1` (on) |
 | `SHORT_PATHS` | `1` turns on the [short-names view](#short-names-for-windows) | `0` (off) |
+| `BIND` | `127.0.0.1` lets [only this PC](#keeping-it-to-this-pc-only) connect | all of your network |
 | `NOTIFY_URL` | Where to send [notifications](#notifications) | none |
+| `HEARTBEAT_URL` | A URL to ping every minute while healthy - see [Dashboards and monitoring](#dashboards-and-monitoring) | none |
+| `STATUS_TOKEN` | A read-only token for `status.json` and `/metrics` | none |
 | `PLEX_URL`, `PLEX_TOKEN`, `PLEX_PATH_MAP` | [Tell Plex about new files](#telling-plex-about-new-files-straight-away) | off |
 | `PLEX_SHORT_NAMES` | Whether Plex reads the short-names view: `auto`, `1` or `0` | `auto` |
 | `NAS_USER`, `NAS_PASS` | Login for network shares, if you use any | - |
@@ -783,28 +934,28 @@ Settings live in two files. After changing either, run `docker compose up -d`.
 | `PLEX_POLL_SECONDS`, `PLEX_SETTLE_SECONDS`, `PLEX_WATCH_DEPTH` | Fine-tuning for the Plex refresh: how often to look, how long to wait after the last change, how many folder levels to watch | `"60"`, `"90"`, `"4"` |
 | `RAR2FS_OPTS` | Options passed to rar2fs. The defaults speed up large multi-part sets and pre-read archives at start-up. | `--seek-length=1 -o warmup` |
 
-Your folders go under `volumes:` in the same file - see
-[Setup, step 1](#1-choose-your-source-folders). The ports are under `ports:`.
+Your folders go in `docker-compose.override.yml` - see
+[Setup, step 1](#1-choose-your-source-folders).
 
 ## Keeping it to this PC only
 
-If no other device needs it, put `127.0.0.1:` in front of each of the three port lines
-in `docker-compose.yml`:
+If no other device needs it, put this in `.env` and run `docker compose up -d`:
 
-```yaml
-    ports:
-      - "127.0.0.1:8765:8080"
-      - "127.0.0.1:8766:8081"
-      - "127.0.0.1:8767:8082"
+```ini
+BIND=127.0.0.1
 ```
 
-Then run `docker compose up -d`. Other machines can't connect at all after that, and
-no firewall rule is needed. A password in `.env` is still required.
+Other machines can't connect at all after that, and no firewall rule is needed. A
+password in `.env` is still required. The setup wizard sets this for you unless you
+say other devices will connect.
 
 ## Troubleshooting
 
-- **The drive is empty or shows an error** - the container isn't running yet. Check
-  `docker ps`; the drive recovers on its own once the container is up.
+- **The drive letter doesn't appear after logging in** - it waits for the container.
+  Check that Docker Desktop is running (`docker ps`). Running
+  `.\windows\mount.ps1` in a window shows what it's waiting for.
+- **The drive is empty or shows an error** - the container stopped after the drive was
+  mounted. Check `docker ps`; the drive recovers on its own once the container is up.
 - **A newly added folder is empty on the drive** - the drive caches folder listings for
   1 minute. Wait a minute and refresh.
 - **"Sorry, there was a problem mounting the file" when opening an ISO** - Windows'
@@ -814,7 +965,7 @@ no firewall rule is needed. A password in `.env` is still required.
 - **"Path too long", or a file with a long name won't open** - see
   [Short names for Windows](#short-names-for-windows).
 - **A source folder is missing** - check `docker logs rar2fs` for its `rar2fs:` line,
-  and make sure the path in `docker-compose.yml` exists. If the status page shows the
+  and make sure the path in `docker-compose.override.yml` exists. If the status page shows the
   folder as *stopped*, the container will restart itself within a few minutes to bring
   it back; `docker compose restart` does it straight away.
 - **The drive stopped working after changing `TLS`, `TLS_HOSTS` or `SHORT_PATHS`** -
@@ -856,6 +1007,10 @@ no firewall rule is needed. A password in `.env` is still required.
   folder names and source paths, so it's password-protected too. Wrong passwords are
   slowed to about two guesses a second, its one action (starting a health report) is
   only accepted from the page itself, and it can't be embedded in another site.
+- **The status token is read-only.** If you set `STATUS_TOKEN`, it can fetch
+  `status.json` and `/metrics` and nothing else: not the page, not the report, and
+  it can't start anything. It travels in the address, so treat it like a password and
+  keep HTTPS on.
 - **Password guessing is slowed down** on the drive as well. A login that has worked
   is remembered and always let through. After more than five wrong logins in ten
   seconds, logins that haven't worked before are refused for a while, so devices

@@ -5,6 +5,7 @@
 #   - checks daily for newer unrar / rar2fs releases
 #   - runs the health report every HEALTH_REPORT_DAYS days (0 = never)
 #   - rebuilds the status page every minute
+#   - if HEARTBEAT_URL is set, pings it every minute while healthy (see heartbeat below)
 # Anything worth knowing goes through `notify`.
 
 INTERVAL=${MONITOR_INTERVAL:-60}
@@ -23,6 +24,31 @@ fi
 now() { date +%s; }
 age() { [ -f "$1" ] && echo $(( $(now) - $(stat -c %Y "$1") )) || echo 999999999; }
 
+# Heartbeat: an outside service (Uptime Kuma, Healthchecks.io ...) expects a ping every
+# minute and raises the alarm when the pings stop - which also covers this PC being off
+# or Docker not running, something nothing inside the container can report.
+heartbeat() {  # up|down, message
+  [ -n "$HEARTBEAT_URL" ] || return 0
+  url=$HEARTBEAT_URL
+  cfg=$(mktemp)                              # the URL holds a secret: keep it off the command line
+  if [ "$1" = up ]; then
+    printf 'url = "%s"\n' "$url" > "$cfg"
+    curl -fsS -m 10 -o /dev/null -K "$cfg" 2>/dev/null || true
+  else
+    case "$url" in
+      *status=up*)                           # Uptime Kuma push: report "down" with the reason
+        url=$(printf '%s' "$url" | sed 's/status=up/status=down/; s/\([?&]\)msg=[^&]*&\{0,1\}/\1/; s/[?&]$//')
+        printf 'url = "%s"\n' "$url" > "$cfg"
+        curl -fsS -m 10 -o /dev/null -G --data-urlencode "msg=$2" -K "$cfg" 2>/dev/null || true ;;
+      *hc-ping.com/*|*/ping/*)               # Healthchecks.io: its /fail address
+        printf 'url = "%s"\n' "${url%/}/fail" > "$cfg"
+        curl -fsS -m 10 -o /dev/null --data-raw "$2" -K "$cfg" 2>/dev/null || true ;;
+      *) ;;                                  # anything else: the missing ping is the signal
+    esac
+  fi
+  rm -f "$cfg"
+}
+
 date +%s > /state/started
 echo starting > /state/health
 fails=0
@@ -37,8 +63,10 @@ while sleep "$INTERVAL"; do
       notify "Recovered" "The container is healthy again."
     fi
     fails=0; echo healthy > /state/health
+    heartbeat up OK
   else
     fails=$((fails + 1)); printf 'unhealthy\t%s\n' "$out" > /state/health
+    heartbeat down "$out"
     if [ "$fails" -eq 3 ]; then
       # restarts in the last hour
       touch /state/restarts

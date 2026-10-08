@@ -1,0 +1,37 @@
+# Your media folders. Copy this file to docker-compose.override.yml and edit it, or
+# run windows\setup.ps1 and let it write the file for you. Docker merges it with
+# docker-compose.yml automatically, and it is gitignored.
+#
+# Every folder mounted at /sources/<name> shows up on the drive as <name>.
+# Format: "<Windows path, forward slashes>:/sources/<name>:ro"
+services:
+  rar2fs:
+    volumes:
+      # A folder or a whole drive  ->  Y:\movies
+      - "D:/Movies:/sources/movies:ro"
+      # - "E:/:/sources/downloads:ro"
+
+      # Several folders as subfolders of one  ->  Y:\tv\tv-1, Y:\tv\tv-2
+      # - "E:/tv:/sources/tv/tv-1:ro"
+      # - "F:/tv:/sources/tv/tv-2:ro"
+
+      # Several folders merged into one: same name, then @ and any label  ->  Y:\music
+      # - "E:/music:/sources/music@e:ro"
+      # - "F:/music:/sources/music@f:ro"
+
+      # A network share (defined below)  ->  Y:\nas
+      # - nas-media:/sources/nas:ro
+
+# Network shares. Docker can't see drive letters that Windows has mapped to a NAS, so a
+# share is connected by its network address. One entry per NAS folder; point "device"
+# straight at the folder. The login comes from NAS_USER / NAS_PASS in .env. After
+# changing a "device", run "docker compose down" and then "docker compose up -d".
+#x-nas-options: &nas-options
+#  type: cifs
+#  o: "username=${NAS_USER:?set NAS_USER in .env},password=${NAS_PASS:?set NAS_PASS in .env},vers=3.0,iocharset=utf8,ro,uid=1000,gid=1000"
+#
+#volumes:
+#  nas-media:
+#    driver_opts:
+#      <<: *nas-options
+#      device: "//nas.example.com/share/folder"

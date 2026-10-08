@@ -123,6 +123,7 @@ echo '</section>'
 cat <<HTML
 <section><h2>Settings</h2><table>
 <tr><td>Plex refresh</td><td>$( [ -n "$PLEX_URL" ] && [ -n "$PLEX_TOKEN" ] && printf 'on · %s' "$(printf '%s' "$PLEX_URL" | esc)" || echo 'off (no PLEX_TOKEN)')</td></tr>
+<tr><td>Heartbeat</td><td>$( [ -n "$HEARTBEAT_URL" ] && echo on || echo 'off (no HEARTBEAT_URL)')</td></tr>
 <tr><td>Notifications</td><td>$( [ -n "$NOTIFY_URL" ] && echo on || echo 'off (no NOTIFY_URL)')</td></tr>
 <tr><td>Automatic restart</td><td>$( [ "${AUTO_RESTART:-1}" = 1 ] && echo on || echo off)</td></tr>
 <tr><td>Archives inside archives</td><td>$( [ "${NESTED_RAR:-1}" = 1 ] && echo on || echo off)</td></tr>
@@ -135,3 +136,5 @@ cat <<HTML
 </main></body></html>
 HTML
 } > "$out.$$.tmp" && mv "$out.$$.tmp" "$out"     # own temp file: several can run at once
+
+status-data 2>/dev/null || true                  # same data as status.json and /metrics

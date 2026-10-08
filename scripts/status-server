@@ -2,13 +2,19 @@
 """Serves the status page on port 8081 and starts a health report when asked.
 
   GET  /status.html, /health-report.txt ...   files from /state/www
+  GET  /status.json                           the same data for dashboards
+  GET  /metrics                               the numbers, in Prometheus format
   POST /run-report  (form field: folder)      starts `run-health-report [folder]`
 
-Every request needs a login from the same list as the drive (/tmp/htpasswd).
+Every request needs a login from the same list as the drive (/tmp/htpasswd). The one
+exception: if STATUS_TOKEN is set, /status.json and /metrics also accept ?token=...,
+for dashboards that can't send a user name and password. The token can only read
+those two; it can't open the page or start anything.
 It serves HTTPS using /tls/cert.pem and /tls/key.pem, unless TLS=0.
 """
 import base64
 import hashlib
+import hmac
 import os
 import re
 import ssl
@@ -22,6 +28,9 @@ WWW = '/state/www'
 HTPASSWD = '/tmp/htpasswd'
 VIEW = '/view'
 RUNNING = '/state/report.running'
+STATUS_TOKEN = os.environ.get('STATUS_TOKEN', '')
+TOKEN_PATHS = ('/status.json', '/metrics')      # all a token can read
+METRICS_TYPE = 'text/plain; version=0.0.4; charset=utf-8'
 TYPES = {'.html': 'text/html; charset=utf-8', '.txt': 'text/plain; charset=utf-8',
          '.json': 'application/json', '.css': 'text/css'}
 FOLDER_OK = re.compile(r'^[^\x00-\x1f\\]{1,300}$')
@@ -102,12 +111,25 @@ class Handler(BaseHTTPRequestHandler):
         self._send(401, b'Login required\n', headers=[('WWW-Authenticate', 'Basic realm="rar2fs-dock"')])
         return False
 
+    def _token_ok(self, url):
+        if not STATUS_TOKEN or url.path not in TOKEN_PATHS:
+            return False
+        given = (urllib.parse.parse_qs(url.query).get('token') or [''])[0]
+        return bool(given) and hmac.compare_digest(given.encode(), STATUS_TOKEN.encode())
+
     def do_GET(self):
-        if not self._authorised():
+        url = urllib.parse.urlparse(self.path)
+        if not self._token_ok(url) and not self._authorised():
             return
-        path = urllib.parse.urlparse(self.path).path
+        path = url.path
         if path in ('', '/'):
             return self._send(302, headers=[('Location', 'status.html')])
+        if path == '/metrics':
+            full = os.path.join(WWW, 'metrics.txt')
+            if not os.path.isfile(full):
+                return self._send(404, b'Not ready yet\n')
+            with open(full, 'rb') as f:
+                return self._send(200, f.read(), METRICS_TYPE)
         name = os.path.basename(path)       # only files directly in WWW are served
         full = os.path.join(WWW, name)
         if path != '/' + name or name.startswith('.') or not os.path.isfile(full):
