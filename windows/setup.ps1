@@ -321,7 +321,8 @@ if (-not $NoMount) {
 $scheme = if ((Get-EnvValue "TLS") -eq "0") { "http" } else { "https" }
 Step "All set"
 if ($mountedOn) { Note "Your files:     $mountedOn\" }
-Note "Status page:    ${scheme}://localhost:8766/status.html"
+Note "Status page:    ${scheme}://localhost:8766/status.html     (health, folders, run a health report)"
+Note "Health as data: ${scheme}://localhost:8766/status.json     (for dashboards and monitoring apps)"
 Note "Login:          $(Get-EnvValue 'WEBDAV_USER')  /  the WEBDAV_PASS value in .env"
 if ($scheme -eq "https") { Note "                (your browser will warn about the certificate once - that's expected)" }
 Note ""
