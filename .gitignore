@@ -3,3 +3,5 @@ linux/common.conf
 config/users.htpasswd
 tls/
 docker-compose.override.yml
+config/folders.conf
+docker-compose.yml.before-update

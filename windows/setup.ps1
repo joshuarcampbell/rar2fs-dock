@@ -25,7 +25,8 @@ param(
     [switch]$Yes,              # accept the defaults instead of asking
     [switch]$Force,            # replace an existing docker-compose.override.yml
     [switch]$NoStart,          # write the files only; don't start the container
-    [switch]$NoMount           # start the container but don't mount the drive
+    [switch]$NoMount,          # start the container but don't mount the drive
+    [switch]$NoTray            # don't add the tray icon
 )
 
 $ErrorActionPreference = 'Stop'
@@ -54,6 +55,16 @@ function AskYesNo($question, [bool]$default) {
     if ([string]::IsNullOrWhiteSpace($answer)) { return $default }
     return $answer.Trim() -match '^(y|yes)$'
 }
+# Runs a docker command quietly and says whether it worked. (With errors set to stop the
+# script, PowerShell would otherwise abort on anything docker prints as a warning.)
+function Test-Docker {
+    $previous = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    try { & docker @args 2>&1 | Out-Null; return ($LASTEXITCODE -eq 0) } catch { return $false } finally { $ErrorActionPreference = $previous }
+}
+function Get-Health {
+    $previous = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    try { return [string](& docker inspect --format '{{.State.Health.Status}}' rar2fs 2>$null) } catch { return "" } finally { $ErrorActionPreference = $previous }
+}
 function Write-TextFile($path, [string[]]$lines) {
     [System.IO.File]::WriteAllText($path, (($lines -join "`n") + "`n"), $utf8)
 }
@@ -80,8 +91,7 @@ if (-not $NoStart) {
         Stop-Setup ("Docker Desktop is not installed. Get it from https://www.docker.com/products/docker-desktop/ " +
             "(or: winget install Docker.DockerDesktop), start it once, then run this again.")
     }
-    docker version --format '{{.Server.Version}}' 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) { Stop-Setup "Docker Desktop is installed but not running. Start it, wait until it says it's running, then run this again." }
+    if (-not (Test-Docker version)) { Stop-Setup "Docker Desktop is installed but not running. Start it, wait until it says it's running, then run this again." }
     Note "Docker is running."
 }
 if (-not $NoStart -and -not $NoMount) {
@@ -289,7 +299,7 @@ try {
 Note "Waiting for it to report healthy..."
 $deadline = (Get-Date).AddMinutes(5); $state = ""
 while ((Get-Date) -lt $deadline) {
-    $state = (docker inspect --format '{{.State.Health.Status}}' rar2fs 2>$null)
+    $state = Get-Health
     if ($state -eq "healthy") { break }
     Start-Sleep -Seconds 5
 }
@@ -317,6 +327,14 @@ if (-not $NoMount) {
     else { Note "The drive hasn't appeared yet. Try: .\windows\mount.ps1 -Drive $Drive   to see why." }
 }
 
+# ---------------------------------------------------------------- tray icon
+if (-not $NoMount -and -not $NoTray) {
+    if (AskYesNo "Add a tray icon that shows whether it's healthy (a coloured dot next to the clock)?" $true) {
+        & (Join-Path $PSScriptRoot "install-tray.ps1") | Out-Null
+        Note "The tray icon is running and will start at every login."
+    }
+}
+
 # ---------------------------------------------------------------- summary
 $scheme = if ((Get-EnvValue "TLS") -eq "0") { "http" } else { "https" }
 Step "All set"
@@ -336,3 +354,4 @@ if (Get-EnvValue "TLS_HOSTS") {
 }
 Note ""
 Note "To change the folders later, edit docker-compose.override.yml and run: docker compose up -d"
+Note "To update to a newer version: .\windows\update.ps1     To save your setup: .\windows\backup.ps1"

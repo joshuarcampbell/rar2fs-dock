@@ -12,7 +12,7 @@ INTERVAL=${MONITOR_INTERVAL:-60}
 REPORT_DAYS=${HEALTH_REPORT_DAYS:-7}
 mkdir -p /state/www
 export LC_ALL=C
-rm -f /state/report.running /state/library.scanning
+rm -f /state/report.running /state/library.scanning /tmp/library-index.running
 # The saved update check belongs to the image that made it. After a rebuild with other
 # versions, throw it away so the check runs again on the first pass.
 saved() { sed -n "s/^$1=//p" /state/versions 2>/dev/null; }
@@ -122,9 +122,16 @@ while sleep "$INTERVAL"; do
     ( run-health-report --notify; library-scan ) > /dev/null 2>&1 &     # then measure sizes
   fi
 
-  # ---- the library index (names and dates; quick): at start-up, then every few minutes ----
-  if [ "$(age /state/library/items.tsv)" -gt $(( ${LIBRARY_INDEX_MINUTES:-10} * 60 )) ] || [ -z "$indexed" ]; then
-    library-index > /dev/null 2>&1 && indexed=1
+  # ---- the library index (names and dates): at start-up, then every few minutes ----
+  # In the background: it takes from seconds to a minute or two on cold disks, and the
+  # health check above must not wait for it.
+  if [ ! -f /tmp/library-index.running ] && \
+     { [ -z "$indexed" ] || [ "$(age /state/library/items.tsv)" -gt $(( ${LIBRARY_INDEX_MINUTES:-10} * 60 )) ]; }; then
+    indexed=1
+    ( touch /tmp/library-index.running
+      nice -n 10 library-index > /dev/null 2>&1
+      rm -f /tmp/library-index.running
+      status-page 2> /dev/null ) &
   fi
 
   status-page 2>/dev/null

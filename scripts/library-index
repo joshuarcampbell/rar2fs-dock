@@ -33,6 +33,8 @@ SKIP_EXT = ('.sfv', '.nfo', '.txt', '.jpg', '.png', '.url')
 EPISODE = re.compile(r'^(?P<t>.+?)[\s._-]+s(?P<s>\d{1,2})[\s._-]?e(?P<e>\d{1,3})(?=\D|$)', re.I)
 SEASON = re.compile(r'^(?P<t>.+?)[\s._-]+s(?P<s>\d{1,2})(?=[\s._-]|$)', re.I)
 YEAR = re.compile(r'^(?P<t>.+?)[\s._(\[-]+(?P<y>(?:19|20)\d{2})(?=[\s._)\]-]|$)')
+# parts of one set (Disc1/Disc2, CD1, Part.2 ...) are not different releases of a title
+PART = re.compile(r'(?<![a-z])(disc|disk|cd|dvd|part|pt|vol|volume)[\s._-]?\d{1,2}(?![0-9])', re.I)
 
 
 def clean(title):
@@ -178,15 +180,17 @@ def main():
 
     versions = []
     for (key, what), places in by_title.items():
-        if len({stem(rel, True).lower() for _, rel, _ in places}) > 1:     # same title, different names
-            releases = []
+        names = {stem(rel, True).lower() for _, rel, _ in places}
+        if len(names) > 1 and len({PART.sub('', n) for n in names}) > 1:    # different releases, not parts of one set
+            by_release = {}                             # one line per release, listing where it is
             for place, rel, folder in places:
-                release = {'name': rel, 'folder': place}
+                release = by_release.setdefault(rel.lower(), {'name': rel, 'folder': place})
+                if place not in release['folder'].split(', '):
+                    release['folder'] += ', ' + place
                 if folder + '/' + rel in sizes:
                     release['bytes'] = sizes[folder + '/' + rel]
-                releases.append(release)
             versions.append({'title': key, 'kind': what,
-                             'releases': sorted(releases, key=lambda r: r['name'].lower())})
+                             'releases': sorted(by_release.values(), key=lambda r: r['name'].lower())})
     versions.sort(key=lambda v: v['title'])
 
     with open(WWW + '/duplicates.txt.tmp', 'w', encoding='utf-8', errors='replace') as f:

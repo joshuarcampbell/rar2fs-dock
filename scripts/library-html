@@ -57,9 +57,9 @@ jq -r --argjson scanning "$scanning" '
   (.duplicates as $d
    | if $d.exact_count == 0 and $d.versions_count == 0 then "<p class=\"none\">None found.</p>"
      else
-       "<p><b>\($d.exact_count)</b> items exist in more than one place"
-       + (if $d.exact_bytes != null and $d.exact_bytes > 0 then ", taking up about <b>\($d.exact_bytes | h)</b> extra" else "" end)
-       + ". <b>\($d.versions_count)</b> titles have more than one release. <a href=\"duplicates.txt\">Full list</a></p>",
+       "<p>In more than one place: <b>\($d.exact_count)</b>"
+       + (if $d.exact_bytes != null and $d.exact_bytes > 0 then " (about <b>\($d.exact_bytes | h)</b> extra)" else "" end)
+       + ". Titles with more than one release: <b>\($d.versions_count)</b>. <a href=\"duplicates.txt\">Full list</a></p>",
        (if $d.exact_count > 0 then
           "<table><tr><th>Same name in more than one place</th><th>Where</th><th style=\"text-align:right\">Size</th></tr>",
           ($d.exact[:8][] | "<tr><td>\(.name | e)</td><td>\(.places | map("<code>\(e)</code>") | join(" "))</td><td class=\"n\">\(.bytes | h)</td></tr>"),

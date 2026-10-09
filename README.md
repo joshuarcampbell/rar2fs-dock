@@ -496,6 +496,11 @@ Windows, so set the PC to log in automatically, or keep it logged in.
 | Stop everything | `docker compose down` |
 | Remove the auto-mount | `.\windows\uninstall-autostart.ps1` |
 | Change the drive letter | `.\windows\uninstall-autostart.ps1`, then `.\windows\install-autostart.ps1 -Drive X:` |
+| Find something, see what's new, spot duplicates | The [status page](#the-library-search-recently-added-duplicates-sizes) |
+| Add a folder without a restart | `.\windows\add-folder.ps1 -Path E:\Concerts` - see [Adding folders without a restart](#adding-folders-without-a-restart) |
+| Update to a newer version | `.\windows\update.ps1` - see [Updating](#updating) |
+| Save your setup, or move it to another PC | `.\windows\backup.ps1` - see [Backup and restore](#backup-and-restore) |
+| See at a glance whether it's healthy | The [tray icon](#tray-icon) |
 
 The container answers on three ports, all with the same logins:
 
@@ -594,6 +599,105 @@ docker exec rar2fs notify "Test" "Hello from rar2fs-dock"
 If the address is wrong or unreachable, the command prints
 `notify: could not deliver to NOTIFY_URL`.
 
+### The library: search, recently added, duplicates, sizes
+
+The status page also knows what is on the drive.
+
+- **Search.** The box at the top finds anything by name across every folder and drive,
+  and tells you which folder it's in. It looks at the top two levels of each folder
+  (a film or show, and the seasons or albums inside it).
+- **Recently added.** The newest items, wherever they landed. The newest 20 are also
+  an RSS feed at `https://<pc>:8766/recent.xml`, for a feed reader.
+- **Duplicates.** Two lists: items with the *same name in more than one place* (the
+  same release on two drives), and *different releases of the same title* (a 720p and
+  a 1080p of one film, or one episode twice). The full list is linked from the page
+  as `duplicates.txt`. In a merged folder it also finds copies that the merged view
+  hides. Parts of one set (Disc1, Disc2) aren't counted as duplicates.
+- **Sizes.** Press **Scan sizes** to measure everything: the total, the size of each
+  folder, how much is in RAR archives, the largest items, and how much space the
+  duplicates take. It also shows what unpacking everything would cost in disk space -
+  which is what this project saves you.
+
+The index of names is rebuilt every 10 minutes and takes a few seconds. The size scan
+reads the size of every file, so it takes minutes on a large library (about five for
+nine terabytes in 140,000 files, in testing); it runs when you press the button and
+after each scheduled health report. Nothing here changes any file.
+
+### Adding folders without a restart
+
+Changing the folder list in `docker-compose.override.yml` restarts the container,
+which pauses the drive - and Plex - for a minute. To add a folder while it keeps
+running:
+
+```powershell
+.\windows\add-folder.ps1 -Path E:\Concerts            # -> Y:\concerts
+.\windows\add-folder.ps1 -Path E:\More-TV -Name tv    # joins the existing tv folder
+.\windows\add-folder.ps1 -Remove concerts
+.\windows\add-folder.ps1 -List
+```
+
+Docker can't attach a new Windows folder to a container that is already running, so
+this works through whole drives. Once a drive is visible to the container (read-only,
+at `/drives/<letter>`), any folder on it can be added or removed in seconds, and the
+other folders aren't touched. The first time you add a folder from a drive, the script
+offers to make that drive visible; that needs one restart, and none after it.
+
+Two things to know. Making a drive visible lets the container read all of it, although
+only the folders you add are ever served. And folders on a NAS can't be added this way;
+they go in `docker-compose.override.yml` as network shares.
+
+Folders added like this are listed in `config\folders.conf`, one per line
+(`concerts = /drives/e/Concerts`). You can edit that file by hand and then run
+`docker exec rar2fs mount-folders reload`.
+
+### Tray icon
+
+A coloured dot next to the clock shows the state at a glance: green for healthy, red
+for unhealthy, amber while starting, grey when the container isn't answering (Docker
+Desktop not running, usually). A notification pops up when the state changes.
+
+```powershell
+.\windows\install-tray.ps1       # start it now and at every login
+.\windows\uninstall-tray.ps1
+```
+
+Right-click it for: the current state, *Open status page*, *Open drive*, *Remount
+drive* and *Restart container*. Double-click opens the status page. The setup wizard
+offers to install it. Windows may tuck new icons behind the **^** arrow; drag it out
+next to the clock to keep it in view.
+
+### Updating
+
+```powershell
+.\windows\update.ps1
+```
+
+One command: it pulls the latest version, rebuilds and restarts the container, waits
+until it's healthy, remounts the drive if that's needed, and tells you if other
+devices need anything (new files for a Linux machine, or a new certificate).
+
+If you're coming from a version that kept your folders in `docker-compose.yml`, it
+first moves them into `docker-compose.override.yml` - your network shares too - so
+the update can't overwrite them. Your old file is kept as
+`docker-compose.yml.before-update`.
+
+### Backup and restore
+
+```powershell
+.\windows\backup.ps1                        # a zip in your Documents folder
+.\windows\backup.ps1 -To D:\Backups
+.\windows\restore.ps1 -File <the zip>
+```
+
+The backup holds everything that is yours: `.env`, your folder list, extra logins,
+folders added without a restart, and the HTTPS certificate. It contains passwords and
+a private key, so keep it somewhere private.
+
+To move to another PC: clone the repo there, run `restore.ps1`, then
+`.\windows\setup.ps1`, which keeps the restored files and does the rest. Because the
+certificate comes along, other devices keep working without being set up again -
+provided the new PC has the same address.
+
 ### Dashboards and monitoring
 
 The status page's information is also available in forms other programs can read, on
@@ -613,7 +717,7 @@ STATUS_TOKEN=pick-a-long-random-string
 
 `https://<pc>:8766/status.json?token=pick-a-long-random-string`
 
-The token can only read those two addresses.
+The token can only read those two addresses and the RSS feed (`/recent.xml`).
 
 **The certificate.** With HTTPS on, the app has to accept the container's self-signed
 certificate. Most have a switch for it ("ignore TLS errors", `verify_ssl: false`), or
@@ -699,7 +803,8 @@ sensor:
 
 Fields in `status.json`: `health` (`healthy`, `unhealthy` or `starting`), `healthy`
 (true/false), `detail` (which check failed), `folders_total`, `folders_mounted`,
-`updates_available`, `report_problems`, `restarts_last_hour`, and the full lists under
+`updates_available`, `report_problems`, `restarts_last_hour`, `library_items`,
+`library_bytes`, `duplicates`, and the full lists under
 `folders`, `versions`, `report`, `settings` and `events`.
 
 ### Updates for unrar and rar2fs
