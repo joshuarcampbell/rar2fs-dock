@@ -89,8 +89,8 @@ drive (Settings → Resources → File sharing, if it asks).
 
 ```yaml
 volumes:
-  - "I:/x264:/sources/films/films-1:ro"        # -> Y:\films\films-1
-  - "F:/Movies 2:/sources/films/films-2:ro"    # -> Y:\films\films-2
+  - "D:/Movies:/sources/films/films-1:ro"    # -> Y:\films\films-1
+  - "E:/Movies:/sources/films/films-2:ro"    # -> Y:\films\films-2
 ```
 
 **Several folders merged into one:** give them the same name followed by `@` and any
@@ -201,7 +201,7 @@ certificate matches the address they connect to. In `.env`, list every address o
 they'll use, separated by commas, then run `docker compose up -d`:
 
 ```ini
-TLS_HOSTS=192.168.1.63
+TLS_HOSTS=192.168.1.10
 ```
 
 **2. Allow the ports through Windows Firewall** (admin PowerShell). 8765 is the drive,
@@ -278,7 +278,7 @@ You'll need:
 - rar2fs-dock running on the Windows PC (see [Setup](#setup) above), with
   a password set in `.env`.
 - The Windows PC's IP address. Run `ipconfig` on it and look for the IPv4 address,
-  e.g. `192.168.1.63`. Put it in `.env` as `TLS_HOSTS` (see
+  e.g. `192.168.1.10`. Put it in `.env` as `TLS_HOSTS` (see
   [Using it from other machines](#using-it-from-other-machines)), so the certificate
   covers it.
 - A Linux server with Plex and systemd, and `sudo` access. The commands below are for
@@ -364,7 +364,7 @@ Fill it in with the Windows PC's IP and the `WEBDAV_USER` / `WEBDAV_PASS` from i
 `.env` file:
 
 ```ini
-RCLONE_WEBDAV_URL=https://192.168.1.63:8765
+RCLONE_WEBDAV_URL=https://192.168.1.10:8765
 RCLONE_WEBDAV_USER=rar2fs
 RCLONE_WEBDAV_PASS=<see below>
 RCLONE_CA_CERT=/etc/rar2fs/cert.pem
@@ -746,10 +746,10 @@ the reason. Any other URL is simply fetched once a minute while healthy.
 
 ```yaml
 - rar2fs-dock:
-    href: https://192.168.1.63:8766/status.html
+    href: https://192.168.1.10:8766/status.html
     widget:
       type: customapi
-      url: https://192.168.1.63:8766/status.json?token=YOUR_TOKEN
+      url: https://192.168.1.10:8766/status.json?token=YOUR_TOKEN
       refreshInterval: 60000
       mappings:
         - field: health
@@ -766,7 +766,7 @@ Homepage checks certificates; give it the container's by setting
 `NODE_EXTRA_CA_CERTS` to a copy of `cert.pem` in Homepage's own container.
 
 *Uptime Kuma* - besides the push monitor above, an *HTTP(s) - Keyword* monitor on
-`https://192.168.1.63:8766/status.json?token=YOUR_TOKEN` with the keyword
+`https://192.168.1.10:8766/status.json?token=YOUR_TOKEN` with the keyword
 `"healthy": true` and *Ignore TLS/SSL errors* switched on.
 
 *Prometheus* (`prometheus.yml`):
@@ -781,7 +781,7 @@ scrape_configs:
     tls_config:
       ca_file: /etc/prometheus/rar2fs-cert.pem   # a copy of tls\cert.pem
     static_configs:
-      - targets: ["192.168.1.63:8766"]
+      - targets: ["192.168.1.10:8766"]
 ```
 
 *Home Assistant* (`configuration.yaml`):
@@ -790,7 +790,7 @@ scrape_configs:
 sensor:
   - platform: rest
     name: rar2fs-dock
-    resource: https://192.168.1.63:8766/status.json?token=YOUR_TOKEN
+    resource: https://192.168.1.10:8766/status.json?token=YOUR_TOKEN
     value_template: "{{ value_json.health }}"
     json_attributes:
       - folders_mounted
@@ -835,7 +835,7 @@ names can't be read by other devices on the network.
   accept once.
 - **`TLS_HOSTS` in `.env` lists the addresses in the certificate.** It always covers
   `localhost`. Add this PC's IP address or name for other devices
-  (`TLS_HOSTS=192.168.1.63,mypc.lan`). Changing it creates a new certificate, and
+  (`TLS_HOSTS=192.168.1.10,mypc.lan`). Changing it creates a new certificate, and
   other devices then need the new `cert.pem`.
 - **To use your own certificate,** put it in `tls\cert.pem` and `tls\key.pem`.
 
@@ -973,7 +973,7 @@ folders and ask Plex to scan just the folder that changed:
 **Plex on Linux** (another machine):
 
 ```ini
-PLEX_URL=http://192.168.1.50:32400
+PLEX_URL=http://192.168.1.20:32400
 PLEX_TOKEN=xxxxxxxxxxxxxxxxxxxx
 PLEX_PATH_MAP=tv=/mnt/media/tv;films=/mnt/media/films
 ```

@@ -8,7 +8,7 @@
 # It never edits /etc/fstab and never mounts over a folder that is in use.
 #
 # Without prompts (for scripts):
-#   sudo ./install.sh --url http://192.168.1.63:8765 --user rar2fs --pass 'secret' \
+#   sudo ./install.sh --url https://192.168.1.10:8765 --user rar2fs --pass 'secret' \
 #        --add tv=/mnt/media/tv --add films=/mnt/media/films
 set -e
 
@@ -56,7 +56,7 @@ systemctl daemon-reload
 if [ -f "$CONF_DIR/common.conf" ] && [ -z "$url" ]; then
   say "Using the server settings already in $CONF_DIR/common.conf"
 else
-  [ -n "$url" ]  || url=$(ask "Server address (e.g. http://192.168.1.63:8765): ")
+  [ -n "$url" ]  || url=$(ask "Server address (e.g. https://192.168.1.10:8765): ")
   [ -n "$user" ] || user=$(ask "User name: ")
   if [ -z "$pass" ]; then
     printf 'Password: ' >&2; stty -echo 2>/dev/null || true; read -r pass; stty echo 2>/dev/null || true; printf '\n' >&2

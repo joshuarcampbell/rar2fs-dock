@@ -1,7 +1,7 @@
 # Server address and login for the rar2fs mounts.
 # `sudo sh install.sh` creates this for you. To do it by hand, copy it to
 # /etc/rar2fs/common.conf and chmod 600 it.
-RCLONE_WEBDAV_URL=https://192.168.1.63:8765
+RCLONE_WEBDAV_URL=https://192.168.1.10:8765
 RCLONE_WEBDAV_USER=rar2fs
 # Output of: rclone obscure '<WEBDAV_PASS from .env>'
 RCLONE_WEBDAV_PASS=
