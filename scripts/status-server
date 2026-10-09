@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Serves the status page on port 8081 and starts a health report when asked.
 
-  GET  /status.html, /health-report.txt ...   files from /state/www
+  GET  /status.html, /health-report.txt ...   files from /state/www (status.html is
+                                              rebuilt first if it is a few seconds old)
   GET  /status.json                           the same data for dashboards
   GET  /metrics                               the numbers, in Prometheus format
   GET  /recent.xml                            the newest items, as an RSS feed
@@ -86,6 +87,36 @@ def login_ok(header):
     return True
 
 
+_build_lock = threading.Lock()
+FRESH_SECONDS = 4
+
+
+def refresh_page():
+    """Rebuild the status page if it is more than a few seconds old.
+
+    The page fetches itself every few seconds while someone has it open, so this is
+    what makes it live - and costs nothing when nobody is looking, because then only
+    `monitor` rebuilds it, once a minute. One build at a time: a second request waits
+    for the first one's result instead of starting its own.
+    """
+    page = os.path.join(WWW, 'status.html')
+
+    def stale():
+        try:
+            return time.time() - os.path.getmtime(page) > FRESH_SECONDS
+        except OSError:
+            return True
+
+    if not stale():
+        return
+    with _build_lock:
+        if stale():
+            try:
+                subprocess.run(['status-page'], timeout=60, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = 'rar2fs-dock'
     sys_version = ''        # don't announce the Python version
@@ -103,9 +134,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('X-Frame-Options', 'DENY')
         self.send_header('Referrer-Policy', 'same-origin')
         # the page is self-contained: nothing may be loaded from, or sent to, anywhere else
+        # (connect-src: it fetches fresh copies of itself, from here only)
         self.send_header('Content-Security-Policy',
                          "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
-                         "form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+                         "connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
         for name, value in headers:
             self.send_header(name, value)
         self.end_headers()
@@ -141,6 +173,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, f.read(), METRICS_TYPE)
         name = os.path.basename(path)       # only files directly in WWW are served
         full = os.path.join(WWW, name)
+        if path == '/status.html':
+            refresh_page()
         if path != '/' + name or name.startswith('.') or not os.path.isfile(full):
             return self._send(404, b'Not found\n')
         with open(full, 'rb') as f:

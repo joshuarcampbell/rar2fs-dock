@@ -1,0 +1,127 @@
+#!/bin/sh
+# Looks for the usual setup mistakes from inside the container and says, in plain
+# words, what is wrong and what to do about it.
+#
+#   doctor          the quick checks - run with every status page build
+#   doctor --full   also asks Plex whether its address and token work
+#
+# One line per finding:   level<TAB>what<TAB>details      (level: ok, warn or bad)
+#
+# It can only see what the container sees. The mistakes that live in the compose files
+# (a network share that is defined but never used, a Windows folder that doesn't exist)
+# are checked on the PC, by windows\doctor.ps1 - which also runs this and shows both.
+STATE=/tmp/folders.state
+EXPECTED=/tmp/mounts.expected
+full=0; [ "${1:-}" = "--full" ] && full=1
+TAB=$(printf '\t')
+say() { printf '%s\t%s\t%s\n' "$1" "$2" "$(printf '%s' "$3" | tr '\t\n' '  ')"; }
+
+# where a folder under /sources really comes from, e.g. H:\Games or //nas/share/TV
+origin() {
+  awk -v m="$1" '$5 == m {
+      for (i = 1; i <= NF; i++) if ($i == "-") { src = $(i + 2); break }
+      root = $4
+      if (src ~ /^[A-Za-z]:/) { gsub(/\//, "\\", root); p = substr(src, 1, 2) root }
+      else                    { p = src (root == "/" ? "" : root) }
+      print p; exit }' /proc/self/mountinfo |
+    sed 's/[\]040/ /g; s/[\]134/\\/g; s/[\][\]*/\\/g'
+}
+
+# ---- is anything shared at all? ----
+if [ ! -s "$STATE" ]; then
+  say bad "No folders" "Nothing is shared yet. Add your folders to docker-compose.override.yml (or run windows\\setup.ps1), then: docker compose up -d"
+fi
+
+# ---- every source folder: readable, and not empty ----
+# The folders Docker mounted under /sources, plus the ones named in config/folders.conf.
+sources=$( {
+    awk 'index($5, "/sources/") == 1 { for (i = 1; i <= NF; i++) if ($i == "-") { print $5 "\t" $(i + 1); break } }' /proc/self/mountinfo
+    cut -f2 "$STATE" 2>/dev/null | tr ':' '\n' | grep -v '^/sources/' | sed 's/$/\tconf/'
+  } | sort -u)
+total=0; wrong=0
+while IFS="$TAB" read -r raw type; do
+  [ -n "$raw" ] || continue
+  path=$(printf '%s' "$raw" | sed 's/[\]040/ /g')
+  total=$((total + 1))
+  if [ "$type" = conf ]; then from=$path; shown=$path; else from=$(origin "$raw"); shown=${path#/sources/}; fi
+  if ! ls -A "$path" > /dev/null 2>&1; then
+    wrong=$((wrong + 1))
+    say bad "$shown can't be read" "The container is not allowed to look inside $from. For a network share, check that the NAS login (NAS_USER / NAS_PASS in .env) may read that folder."
+  elif [ -z "$(ls -A "$path" 2>/dev/null | head -1)" ]; then
+    wrong=$((wrong + 1))
+    case "$type" in
+      cifs|nfs*) say warn "$shown is empty" "The network share $from connected, but there is nothing in it. Check that its \"device\" line points at the folder that holds the files, and that the NAS login may see them." ;;
+      conf)      say warn "$shown is empty" "This folder from config/folders.conf has nothing in it. Check the path." ;;
+      *)         say warn "$shown is empty" "$from has nothing in it. If it should, check how the path is spelled in docker-compose.override.yml: Docker quietly creates a folder that doesn't exist. A drive letter that Windows mapped to a NAS also shows up empty - connect it as a network share instead (see the README)." ;;
+    esac
+  fi
+done <<EOF
+$sources
+EOF
+[ "$total" -gt 0 ] && [ "$wrong" -eq 0 ] && say ok "Source folders" "All $total can be read and none is empty."
+
+# ---- every folder still mounted ----
+if [ -s "$EXPECTED" ]; then
+  stopped=""
+  while IFS= read -r m; do
+    case "$m" in /view/*) ls "$m" > /dev/null 2>&1 || stopped="$stopped ${m#/view/}" ;; esac
+  done < "$EXPECTED"
+  if [ -n "$stopped" ]; then
+    say bad "Stopped:$stopped" "These folders have stopped answering. The container restarts itself after three failed checks; to do it now: docker compose restart"
+  else
+    say ok "Folders" "All $(grep -c '^/view/' "$EXPECTED") are mounted and answering."
+  fi
+fi
+
+# ---- config/folders.conf: lines that were skipped ----
+if [ -f /config/folders.conf ]; then
+  mount-folders plan 2>&1 > /dev/null | sed 's/^mount-folders: folders.conf: //' | while IFS= read -r line; do
+    [ -n "$line" ] && say warn "folders.conf" "$line"
+  done
+fi
+
+# ---- the login ----
+if [ "$WEBDAV_PASS" = "change-me" ]; then
+  say warn "Password" "WEBDAV_PASS is still the example one. Anyone on your network can open the drive. Change it in .env, then: docker compose up -d"
+fi
+
+# ---- the HTTPS certificate ----
+if [ "${TLS:-1}" = "1" ] && [ -f /tls/cert.pem ]; then
+  ends=$(openssl x509 -in /tls/cert.pem -noout -enddate 2>/dev/null | sed 's/^notAfter=//')
+  renew="Delete the tls folder and restart the container to get a new one, then copy tls/cert.pem to the other machines again."
+  if ! openssl x509 -in /tls/cert.pem -noout -checkend 0 > /dev/null 2>&1; then
+    say bad "HTTPS certificate" "It ran out on $ends, so other machines will refuse to connect. $renew"
+  elif ! openssl x509 -in /tls/cert.pem -noout -checkend 2592000 > /dev/null 2>&1; then
+    say warn "HTTPS certificate" "It runs out on $ends. $renew"
+  else
+    say ok "HTTPS certificate" "Good until $ends."
+  fi
+fi
+
+# ---- Plex refresh ----
+if [ -n "$PLEX_URL" ] && [ -n "$PLEX_TOKEN" ]; then
+  plex_wrong=0
+  if [ -z "$PLEX_PATH_MAP" ]; then
+    plex_wrong=1
+    say warn "Plex refresh" "PLEX_PATH_MAP is empty, so Plex can't be told which of its folders changed. Set it in .env (see the README)."
+  else
+    for name in $(printf '%s' "$PLEX_PATH_MAP" | tr ';' '\n' | sed -n 's/^[[:space:]]*\([^=/]*\).*=.*/\1/p' | sort -u); do
+      cut -f1 "$STATE" 2>/dev/null | grep -qxF "$name" && continue
+      plex_wrong=1
+      say warn "Plex refresh" "PLEX_PATH_MAP mentions \"$name\", but no shared folder has that name. Shared: $(cut -f1 "$STATE" 2>/dev/null | tr '\n' ' ')"
+    done
+  fi
+  if [ "$full" = 1 ]; then
+    # the token goes in on stdin, so it never shows in a process list
+    code=$(printf 'header = "X-Plex-Token: %s"\n' "$PLEX_TOKEN" | curl -sk -m 6 -o /dev/null -w '%{http_code}' -K - "${PLEX_URL%/}/library/sections" 2>/dev/null)
+    case "$code" in
+      200) [ "$plex_wrong" = 0 ] && say ok "Plex refresh" "Plex answers at $PLEX_URL and accepts the token." ;;
+      401) say bad "Plex refresh" "Plex answers at $PLEX_URL but turned down PLEX_TOKEN. Get a fresh token (see the README) and put it in .env." ;;
+      000) say bad "Plex refresh" "Nothing answers at $PLEX_URL. Check the address, and that Plex is running and reachable from this PC." ;;
+      *)   say warn "Plex refresh" "Plex at $PLEX_URL answered with code $code, not the expected 200." ;;
+    esac
+  elif [ "$plex_wrong" = 0 ]; then
+    say ok "Plex refresh" "On, for: $(printf '%s' "$PLEX_PATH_MAP" | tr ';' '\n' | sed -n 's/^[[:space:]]*\([^=]*\)=.*/\1/p' | tr '\n' ' ')"
+  fi
+fi
+exit 0

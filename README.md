@@ -193,33 +193,149 @@ That's it - open `Y:\` in Explorer.
 
 ## Using it from other machines
 
-The server is reachable from your network at `https://<this-PC's-IP>:8765`, using the
-login in `.env`. Two things to do once on this PC:
+Two machines are involved here:
 
-**1. Put this PC's address in the certificate.** Other devices check that the
-certificate matches the address they connect to. In `.env`, list every address or name
-they'll use, separated by commas, then run `docker compose up -d`:
+- **The server PC** has the archives and runs the container. Everything in
+  [Setup](#setup) happens there.
+- **The other machine** has no Docker and no archives. It connects to the server PC
+  over your network and shows the same unpacked folders.
+
+```
+        SERVER PC (192.168.1.10)                         OTHER MACHINE
+ archives ─► Docker container ─► port 8765  ◄── network ──  rclone ─► Y:\
+```
+
+Do [the server PC part](#on-the-server-pc-once) once, then follow the part for the
+kind of machine you're connecting.
+
+### On the server PC (once)
+
+**1. Find the server PC's address.** In PowerShell run `ipconfig` and note the *IPv4
+Address* of your network adapter, for example `192.168.1.10`. The examples below use
+that one - put yours in its place. If your router lets you reserve an address for a
+device, do that for this PC, so the address never changes.
+
+**2. Make sure the container accepts other devices.** Open `.env`. If it has a line
+`BIND=127.0.0.1`, delete it - the setup wizard adds that line when you answer that only
+this PC should connect.
+
+**3. Put the address in the certificate.** Other devices check that the certificate
+matches the address they connect to. Still in `.env`, list every address or name they
+will use, separated by commas:
 
 ```ini
 TLS_HOSTS=192.168.1.10
 ```
 
-**2. Allow the ports through Windows Firewall** (admin PowerShell). 8765 is the drive,
-8766 the status page and 8767 the short-names view:
+**4. Apply both changes:**
+
+```powershell
+docker compose up -d
+```
+
+**5. Allow the ports through Windows Firewall.** In a PowerShell window opened with
+*Run as administrator*:
 
 ```powershell
 New-NetFirewallRule -DisplayName "rar2fs-dock" -Direction Inbound -Protocol TCP -LocalPort 8765-8767 -Action Allow -Profile Private
 ```
 
+8765 is the drive, 8766 the status page and 8767 the
+[short-names view](#short-names-for-windows). The rule only applies while Windows
+treats your network as *Private* (Settings → Network & Internet → your connection →
+*Network profile*).
+
+**6. Check it from the other machine.** In a browser there, open
+`https://192.168.1.10:8766/status.html`. Accept the certificate warning and log in with
+the user and password from the server PC's `.env`. If the status page appears, the
+network side is done. If it doesn't, see
+[When the other machine can't connect](#when-the-other-machine-cant-connect).
+
+### Connecting another Windows PC
+
+On the other PC. It doesn't need Docker or a copy of your archives.
+
+**1. Install WinFsp and rclone,** then open a **new** PowerShell window:
+
+```powershell
+winget install WinFsp.WinFsp
+winget install Rclone.Rclone
+```
+
+**2. Make a folder for the scripts,** for example `C:\rar2fs-dock`, and copy two
+things into it from the server PC (a USB stick or a shared folder will do):
+
+| Copy from the server PC | To the other PC |
+|---|---|
+| the whole `windows` folder | `C:\rar2fs-dock\windows\` |
+| `tls\cert.pem` (only this file - never `key.pem`) | `C:\rar2fs-dock\tls\cert.pem` |
+
+**3. Save the login.** Create `C:\rar2fs-dock\.env` in Notepad with these two lines,
+using a login the server accepts - the one from the server PC's `.env`, or better a
+separate one made for this PC (see [More logins](#more-logins)):
+
+```ini
+WEBDAV_USER=yourname
+WEBDAV_PASS=yourpassword
+```
+
+Don't copy the server PC's whole `.env`; these two lines are all this PC needs.
+
+**4. Try it.** The address is the server PC's, not `localhost`:
+
+```powershell
+cd C:\rar2fs-dock
+.\windows\mount.ps1 -Url https://192.168.1.10:8765
+```
+
+`Y:` appears in Explorer with the same folders as on the server PC. It stays while the
+window is open; close the window to disconnect. Add `-Drive X:` for another letter.
+
+**5. Make it permanent.** Once that works, close the window and run:
+
+```powershell
+.\windows\install-autostart.ps1 -Url https://192.168.1.10:8765
+```
+
+The drive now comes back at every login. Remove it with
+`.\windows\uninstall-autostart.ps1`.
+
+Things to know:
+
+- **Long names:** if the server PC has `SHORT_PATHS=1`, use port `8767` in the address
+  instead of `8765` to get the view with shortened names.
+- **The server PC has to be on,** with Docker Desktop running. While it's off, the drive
+  letter waits and appears by itself once the server answers again.
+- **If the certificate on the server PC is ever recreated** (after changing
+  `TLS_HOSTS`, for example), copy the new `tls\cert.pem` over again.
+- **The tray icon, `doctor.ps1`, `update.ps1` and the backup scripts are for the
+  server PC only.** On the other PC you only need `mount.ps1`, `install-autostart.ps1`
+  and `uninstall-autostart.ps1`.
+- **If PowerShell refuses to run the scripts,** run this first:
+  `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
+
+### Connecting Linux, a Mac or a media player
+
 - **Plex (or anything else) on Linux:** see [Plex on Linux](#plex-on-linux) below.
-- **Another Windows PC:** copy the `windows` folder over, plus this PC's `tls\cert.pem`
-  into a `tls` folder next to it. Install WinFsp and rclone, and run
-  `.\windows\mount.ps1 -Url https://<this-PC's-IP>:8765 -User <user> -Pass <password>`.
 - **Mac, and media players** (Kodi, VLC, Infuse): add a WebDAV source at
-  `https://<this-PC's-IP>:8765` with the same login. Many of these refuse a
+  `https://192.168.1.10:8765` with the same login. Many of these refuse a
   self-signed certificate or make it awkward to accept one. If yours does, either
   install `tls\cert.pem` as a trusted certificate on that device, or turn HTTPS off
   (see [HTTPS](#https)).
+
+### When the other machine can't connect
+
+| What you see | What it means and what to do |
+|---|---|
+| The status page doesn't open in the browser at all (it times out) | The other machine can't reach the server PC. Check the address with `ipconfig` on the server PC, that `.env` there has no `BIND=127.0.0.1`, that the firewall rule exists and the network is *Private*, and that both machines are on the same network (a guest Wi-Fi is usually kept apart). |
+| The status page opens, but `mount.ps1` keeps saying *Waiting for the rar2fs container to answer* with a `certificate` error | The address you used isn't in the certificate, or `tls\cert.pem` on the other PC is an old copy. Add the address to `TLS_HOSTS` on the server PC, run `docker compose up -d`, and copy `tls\cert.pem` over again. |
+| *The server ... rejected the login* | The user or password in the other PC's `.env` isn't one the server accepts. Compare it with the server PC's `.env`, or with the login you made for this PC. |
+| *rclone not found* | Open a new PowerShell window after installing rclone. |
+| *Y: is already in use* | Pick another letter: add `-Drive X:`. |
+| It worked, then stopped after a change on the server PC | Changing `TLS`, `TLS_HOSTS` or `SHORT_PATHS` there changes the address or the certificate. Copy the new `tls\cert.pem`, then run `uninstall-autostart.ps1` and `install-autostart.ps1` again with the right address. |
+
+On the server PC, `.\windows\doctor.ps1` checks the container side for you (see
+[Setup check](#setup-check)).
 
 ## Plex on the same Windows PC
 
@@ -499,6 +615,7 @@ Windows, so set the PC to log in automatically, or keep it logged in.
 | Find something, see what's new, spot duplicates | The [status page](#the-library-search-recently-added-duplicates-sizes) |
 | Add a folder without a restart | `.\windows\add-folder.ps1 -Path E:\Concerts` - see [Adding folders without a restart](#adding-folders-without-a-restart) |
 | Update to a newer version | `.\windows\update.ps1` - see [Updating](#updating) |
+| Find out why something isn't working | `.\windows\doctor.ps1` - see [Setup check](#setup-check) |
 | Save your setup, or move it to another PC | `.\windows\backup.ps1` - see [Backup and restore](#backup-and-restore) |
 | See at a glance whether it's healthy | The [tray icon](#tray-icon) |
 
@@ -525,12 +642,49 @@ another device), with the same login as the drive. Your browser will warn about 
 self-signed certificate the first time; accept it once. It shows each folder, where it
 comes from and whether it's mounted or has stopped, the unrar/rar2fs versions and
 whether newer ones exist, the last health report, recent events (restarts, Plex scans,
-alerts) and the current settings. It refreshes every minute.
+alerts) and the current settings.
+
+The page is live: while you have it open it updates itself every few seconds, without
+reloading, so a folder that stops or a report that finishes shows up straight away. A
+red bar appears at the top if the container stops answering. When nobody is looking the
+container only rebuilds the page once a minute, so a forgotten tab costs nothing - a tab
+in the background pauses too.
 
 The **Run health report** button starts a [health report](#health-report) without
 opening a terminal. Choose *Everything* or a single folder first - one folder is much
 quicker. The page shows *running* while it works and updates by itself when the result
 is in. Only one report runs at a time.
+
+### Setup check
+
+When something isn't right - a folder is missing from the drive, a network share is
+empty, the container won't start - run:
+
+```powershell
+.\windows\doctor.ps1
+```
+
+It changes nothing. It reads `.env` and the compose files, looks at every folder and
+network share they name, asks the container what it sees, and prints one line per
+check: `ok`, `CHECK` (worth a look) or `PROBLEM`, with what to do about it. Among the
+things it catches:
+
+- a Windows folder that doesn't exist or is misspelled (Docker quietly creates it, empty)
+- a drive letter that Windows mapped to a NAS, which Docker can't see
+- a network share that is defined at the bottom of the file but that no line under the
+  service's `volumes:` uses, so it never appears on the drive
+- a network share entry with no `device:`, or one Docker can't reach
+- a network share whose address or login you changed after Docker first connected it -
+  Docker keeps using the old one until the volume is removed, and the check gives you
+  the exact commands
+- folders you added to the file but haven't applied yet with `docker compose up -d`
+- source folders that are empty or unreadable from inside the container
+- an HTTPS certificate that is about to run out, the example password still in use,
+  and Plex refresh settings that don't match your folders or that Plex turns down
+
+The checks the container can do by itself also run all the time and show on the status
+page under **Setup check**, in `status.json` (`setup_problems`, `setup_check`) and as
+the `rar2fs_dock_setup_problems` metric.
 
 ### Automatic restart
 
@@ -1055,6 +1209,9 @@ password in `.env` is still required. The setup wizard sets this for you unless 
 say other devices will connect.
 
 ## Troubleshooting
+
+Start with `.\windows\doctor.ps1` - see [Setup check](#setup-check). It finds most of
+the mistakes below by itself and says how to fix them.
 
 - **The drive letter doesn't appear after logging in** - it waits for the container.
   Check that Docker Desktop is running (`docker ps`). Running

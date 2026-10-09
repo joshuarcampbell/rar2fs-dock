@@ -58,6 +58,10 @@ else
   l_items=null; l_dupes=null; l_bytes=null
 fi
 
+# ---- setup check (written by doctor, via status-page) ----
+jq -R -s 'split("\n") | map(select(length > 0) | split("\t") | {level: .[0], title: .[1], detail: (.[2] // "")})' \
+  /state/doctor.tsv > "$tmp/checks" 2>/dev/null || echo '[]' > "$tmp/checks"
+
 on() { [ "$1" = "$2" ] && echo true || echo false; }
 if [ -n "$PLEX_URL" ] && [ -n "$PLEX_TOKEN" ]; then plex=true; else plex=false; fi
 if [ -n "$NOTIFY_URL" ]; then notify=true; else notify=false; fi
@@ -65,7 +69,7 @@ if [ -n "$NOTIFY_URL" ]; then notify=true; else notify=false; fi
 jq -n \
   --arg health "$health" --arg detail "$detail" \
   --argjson generated "$(date +%s)" --argjson started "$(num "$(cat /state/started 2>/dev/null)")" \
-  --slurpfile folders "$tmp/folders" --slurpfile events "$tmp/events" \
+  --slurpfile folders "$tmp/folders" --slurpfile events "$tmp/events" --slurpfile checks "$tmp/checks" \
   --arg unrar "$UNRAR_VERSION" --arg unrar_latest "$unrar_latest" --argjson unrar_update "$unrar_update" \
   --arg rar2fs "$RAR2FS_VERSION" --arg rar2fs_latest "$rar2fs_latest" --argjson rar2fs_update "$rar2fs_update" \
   --argjson r_running "$r_running" --arg r_scope "$r_scope" --argjson r_finished "$(num "$r_finished")" \
@@ -87,12 +91,14 @@ jq -n \
       folders_total: ($folders | length),
       folders_mounted: ($folders | map(select(.mounted)) | length),
       updates_available: ([$unrar_update, $rar2fs_update] | map(select(.)) | length),
+      setup_problems: ($checks[0] | map(select(.level != "ok")) | length),
       report_problems: (if $r_finished == null then null else ($counts | map(. // 0) | add) end),
       restarts_last_hour: $restarts,
       library_items: $l_items,
       library_bytes: $l_bytes,
       duplicates: $l_dupes,
       folders: $folders,
+      setup_check: ($checks[0] | map(select(.level != "ok"))),
       versions: {
         unrar:  {installed: $unrar,  latest: (if $unrar_latest  == "" then null else $unrar_latest  end), update_available: $unrar_update},
         rar2fs: {installed: $rar2fs, latest: (if $rar2fs_latest == "" then null else $rar2fs_latest end), update_available: $rar2fs_update}
@@ -146,6 +152,9 @@ jq -r '
     "# TYPE rar2fs_dock_library_bytes gauge",
     "rar2fs_dock_library_bytes \(.library_bytes)"
   end),
+  "# HELP rar2fs_dock_setup_problems Things the setup check found wrong (an empty source folder, a certificate about to run out ...).",
+  "# TYPE rar2fs_dock_setup_problems gauge",
+  "rar2fs_dock_setup_problems \(.setup_problems)",
   "# HELP rar2fs_dock_restarts_last_hour Automatic restarts in the last hour.",
   "# TYPE rar2fs_dock_restarts_last_hour gauge",
   "rar2fs_dock_restarts_last_hour \(.restarts_last_hour)",

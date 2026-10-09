@@ -13,3 +13,4 @@ button{background:var(--ok);border-color:var(--ok);color:#fff;font-weight:600;cu
 .dim{color:var(--dim)}code{font:13px ui-monospace,Consolas,monospace}.none{color:var(--dim);margin:0}
 input[type=search]{font:inherit;padding:6px 10px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--fg);flex:1;min-width:180px}
 a{color:inherit}
+#lost{max-width:920px;margin:0 auto 16px;padding:8px 14px;border-radius:8px;background:var(--bad);color:#fff;font-weight:600}

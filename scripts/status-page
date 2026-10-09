@@ -1,10 +1,13 @@
 #!/bin/sh
 # Writes /state/www/status.html - a snapshot of what the container is doing.
-# Rebuilt every minute by `monitor`; served on port 8081 with the same logins as the drive.
+# Rebuilt every minute by `monitor`, and by status-server whenever someone is looking at
+# it (the page fetches a fresh copy of itself every few seconds - see page.js).
+# Served on port 8081 with the same logins as the drive.
 out=/state/www/status.html
 esc() { sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g; s/'"'"'/\&#39;/g'; }
 when() { printf '<time data-t="%s"></time>' "$1"; }   # shown in the viewer's local time
 val() { sed -n "s/^$1=//p" /state/versions 2>/dev/null; }
+TAB=$(printf '\t')
 
 # where a /sources folder really comes from, e.g. H:\Games or //nas/share/TV
 origin() {
@@ -28,12 +31,12 @@ esac
 cat <<HTML
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="$( { [ -f /state/report.running ] || [ -f /state/library.scanning ]; } && echo 10 || echo 60 )"><title>rar2fs-dock status</title>
+<noscript><meta http-equiv="refresh" content="60"></noscript><title>rar2fs-dock status</title>
 <style>
 $(cat /usr/local/bin/page.css)
-</style></head><body><main>
+</style></head><body><p id="lost" hidden></p><main>
 <h1>rar2fs-dock <span class="badge $badge">$label</span></h1>
-<p class="sub">Started $(when "$(cat /state/started 2>/dev/null)") · page built $(when "$(date +%s)")$( [ -n "$detail" ] && printf ' · %s' "$(printf '%s' "$detail" | esc)")</p>
+<p class="sub">Started $(when "$(cat /state/started 2>/dev/null)") · live, last updated $(when "$(date +%s)")$( [ -n "$detail" ] && printf ' · %s' "$(printf '%s' "$detail" | esc)")</p>
 <form method="get" action="search" class="run" style="margin:0 0 16px"><input type="search" name="q" placeholder="Search the library by name" required> <button type="submit">Search</button></form>
 
 <section><h2>Folders</h2><table>
@@ -54,6 +57,22 @@ for name in $folders; do
 done
 echo '</table></section>'
 
+# what `doctor` found: problems first, then one line for everything that passed
+doctor > /state/doctor.tsv.$$.tmp 2>/dev/null && mv /state/doctor.tsv.$$.tmp /state/doctor.tsv
+echo '<section><h2>Setup check</h2>'
+if grep -qv "^ok$TAB" /state/doctor.tsv 2>/dev/null; then
+  echo '<table>'
+  grep -v "^ok$TAB" /state/doctor.tsv | sort | while IFS="$TAB" read -r level title msg; do
+    [ "$level" = bad ] && b='<span class="badge bad">problem</span>' || b='<span class="badge wait">check</span>'
+    printf '<tr><td>%s</td><td><b>%s</b><br>%s</td></tr>\n' "$b" "$(printf '%s' "$title" | esc)" "$(printf '%s' "$msg" | esc)"
+  done
+  echo '</table>'
+else
+  echo '<p><span class="badge ok">all good</span> Nothing looks wrong from inside the container.</p>'
+fi
+passed=$(grep "^ok$TAB" /state/doctor.tsv 2>/dev/null | cut -f2 | esc | sed 's/$/ · /' | tr -d '\n' | sed 's/ · $//')
+echo "<p class=\"sub\" style=\"margin:10px 0 0\">$( [ -n "$passed" ] && printf 'Passed: %s. ' "$passed")For the checks that need your compose files, run <code>windows/doctor.ps1</code> on the PC.</p></section>"
+
 library-html 2>/dev/null       # overview, recently added, duplicates
 
 echo '<section><h2>Versions</h2><table><tr><th>Component</th><th>In this image</th><th>Latest</th><th></th></tr>'
@@ -71,7 +90,7 @@ c=$(val checked); echo "</table><p class=\"sub\" style=\"margin:10px 0 0\">$( [ 
 echo '<section><h2>Health report</h2>'
 if [ -f /state/report.running ]; then
   IFS="$(printf '\t')" read -r started scope < /state/report.running
-  echo "<p><span class=\"badge wait\">running</span> Checking <b>$(printf '%s' "$scope" | esc)</b>, started $(when "$started"). This page updates when it finishes.</p>"
+  echo "<p><span class=\"badge wait\">running</span> Checking <b>$(printf '%s' "$scope" | esc)</b>, started $(when "$started"). This page shows the result when it finishes.</p>"
 fi
 if [ -f /state/www/health-report.txt ]; then
   scope=$(sed -n '1s/^Health report for: //p' /state/www/health-report.txt)
@@ -123,8 +142,10 @@ cat <<HTML
 <tr><td>Logins</td><td>$(cut -d: -f1 /tmp/htpasswd 2>/dev/null | esc | tr '\n' ' ')</td></tr>
 <tr><td>Hidden</td><td><code>$(printf '%s' "${HIDE-default}" | esc)</code></td></tr>
 </table></section>
-<script>for(const t of document.querySelectorAll('time[data-t]')){const d=new Date(t.dataset.t*1000);if(!isNaN(d)){t.textContent=d.toLocaleString();t.dateTime=d.toISOString()}}</script>
-</main></body></html>
+</main>
+<script>
+$(cat /usr/local/bin/page.js)
+</script></body></html>
 HTML
 } > "$out.$$.tmp" && mv "$out.$$.tmp" "$out"     # own temp file: several can run at once
 
