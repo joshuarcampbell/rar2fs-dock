@@ -881,8 +881,8 @@ Put that in `.env`, then run `docker compose up -d`.
   so it stays whole. The folder it sits in gives up the room instead:
 
   ```
-  before  ...CHAMPIONSHIP.2026\WRC.FIA.WORLD.RALLY.CHAMPIONSHIP.2026.Rally.Japan.Aichi.Highlights.1080p.WEB.H264-13\<file>
-  after   ...CHAMPIONSHIP.2026\Rally.Japan.Aichi.Highlights.1080p~aa37\<file, unchanged>
+  before  ...Sailing.League.2026\Northern.Lakes.Sailing.League.2026.Round.3.Pine.Harbor.Highlights.1080p.WEB.H264-GRP\<file>
+  after   ...Sailing.League.2026\Round.3.Pine.Harbor.Highlights.1080p~aa37\<file, unchanged>
   ```
 
   The part of a folder's name that just repeats its parent folder goes first, then the

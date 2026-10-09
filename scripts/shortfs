@@ -10,8 +10,8 @@ Names that fit are left exactly as they are, and nothing on disk is renamed.
 Folders are shortened before files, because the file name is what players and
 media libraries go by:
 
-    ...CHAMPIONSHIP.2026/WRC.FIA.WORLD.RALLY.CHAMPIONSHIP.2026.Rally.Chile.Bio.Bio.Highlights.1080p.WEB.H264-13/<file>
- -> ...CHAMPIONSHIP.2026/Rally.Chile.Bio.Bio.Highlights.1080p~9a02/<file, unchanged>
+    ...Sailing.League.2026/Northern.Lakes.Sailing.League.2026.Round.3.Pine.Harbor.Highlights.1080p.WEB.H264-GRP/<file>
+ -> ...Sailing.League.2026/Round.3.Pine.Harbor.Highlights.1080p~9a02/<file, unchanged>
 
 Rules (N = --max-path, counted from the drive root, so "Y:\\" is not included):
   - A folder is shortened as far as the files directly inside it need to fit
