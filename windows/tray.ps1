@@ -141,6 +141,66 @@ $restart = $menu.Items.Add("Restart container")
 $exit = $menu.Items.Add("Exit")
 $tray.ContextMenuStrip = $menu
 
+# The menu follows Windows' light or dark setting (Settings > Personalisation > Colours >
+# "Choose your default app mode"). Looked up each time the menu opens, so changing the
+# setting takes effect without restarting the tray icon.
+Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @'
+using System.Drawing;
+using System.Windows.Forms;
+public class Rar2fsDockDarkColors : ProfessionalColorTable {
+    static readonly Color Back = Color.FromArgb(43, 43, 43);
+    static readonly Color Line = Color.FromArgb(80, 80, 80);
+    static readonly Color Hover = Color.FromArgb(65, 65, 65);
+    public override Color ToolStripDropDownBackground { get { return Back; } }
+    public override Color ImageMarginGradientBegin { get { return Back; } }
+    public override Color ImageMarginGradientMiddle { get { return Back; } }
+    public override Color ImageMarginGradientEnd { get { return Back; } }
+    public override Color MenuBorder { get { return Line; } }
+    public override Color SeparatorDark { get { return Line; } }
+    public override Color SeparatorLight { get { return Line; } }
+    public override Color MenuItemBorder { get { return Hover; } }
+    public override Color MenuItemSelected { get { return Hover; } }
+    public override Color MenuItemSelectedGradientBegin { get { return Hover; } }
+    public override Color MenuItemSelectedGradientEnd { get { return Hover; } }
+}
+public class Rar2fsDockDarkRenderer : ToolStripProfessionalRenderer {
+    public Rar2fsDockDarkRenderer() : base(new Rar2fsDockDarkColors()) { RoundedEdges = false; }
+    protected override void OnRenderItemText(ToolStripItemTextRenderEventArgs e) {
+        e.TextColor = e.Item.Enabled ? Color.FromArgb(240, 240, 240) : Color.FromArgb(150, 150, 150);
+        base.OnRenderItemText(e);
+    }
+    protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e) {
+        Color fill = e.Item.Selected && e.Item.Enabled ? Color.FromArgb(65, 65, 65) : Color.FromArgb(43, 43, 43);
+        using (SolidBrush brush = new SolidBrush(fill)) {
+            e.Graphics.FillRectangle(brush, new Rectangle(2, 0, e.Item.Width - 3, e.Item.Height));
+        }
+    }
+    protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e) {
+        int y = e.Item.Height / 2;
+        using (Pen pen = new Pen(Color.FromArgb(80, 80, 80))) {
+            e.Graphics.DrawLine(pen, 4, y, e.Item.Width - 4, y);
+        }
+    }
+}
+'@
+$darkRenderer = New-Object Rar2fsDockDarkRenderer
+function Test-DarkMode {
+    $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+    $light = (Get-ItemProperty -Path $key -Name AppsUseLightTheme -ErrorAction SilentlyContinue).AppsUseLightTheme
+    return ($null -ne $light -and $light -eq 0)       # no such setting (older Windows) = light
+}
+$applyTheme = {
+    if (Test-DarkMode) {
+        $menu.Renderer = $darkRenderer
+        $menu.BackColor = [System.Drawing.Color]::FromArgb(43, 43, 43)
+    } else {
+        $menu.RenderMode = [System.Windows.Forms.ToolStripRenderMode]::ManagerRenderMode
+        $menu.BackColor = [System.Drawing.SystemColors]::Control
+    }
+}
+$menu.add_Opening($applyTheme)
+& $applyTheme
+
 $openStatusPage = { Start-Process "$((Get-Settings).Base)/status.html" }
 $openPage.add_Click($openStatusPage)
 $tray.add_DoubleClick($openStatusPage)
