@@ -335,6 +335,11 @@ if (-not $NoMount -and -not $NoTray) {
     }
 }
 
+# ---------------------------------------------------------------- Plex on another Windows PC
+if (-not $Yes -and (AskYesNo "Does Plex run on ANOTHER Windows PC? Set that PC up now?" $false)) {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "connect-plex.ps1")
+}
+
 # ---------------------------------------------------------------- summary
 $scheme = if ((Get-EnvValue "TLS") -eq "0") { "http" } else { "https" }
 Step "All set"
@@ -346,6 +351,7 @@ if ($scheme -eq "https") { Note "                (your browser will warn about t
 Note ""
 Note "Using Plex on this PC? Add the folders from $(if ($mountedOn) { $mountedOn } else { 'the drive' }) to your libraries, and turn off"
 Note "'Empty trash automatically after every scan' first. See the README, 'Plex on the same Windows PC'."
+Note "Plex on another Windows PC? Run .\windows\connect-plex.ps1 any time."
 if (Get-EnvValue "TLS_HOSTS") {
     Note ""
     Note "For other devices, allow the ports through Windows Firewall once (admin PowerShell):"

@@ -16,7 +16,8 @@ Plex server, for instance - can mount the same view.
 
 **Contents:** [What you need](#what-you-need) · [Setup](#setup) ·
 [Other machines](#using-it-from-other-machines) ·
-[Plex on this PC](#plex-on-the-same-windows-pc) · [Plex on Linux](#plex-on-linux) ·
+[Plex on this PC](#plex-on-the-same-windows-pc) ·
+[Plex on another Windows PC](#plex-on-another-windows-pc) · [Plex on Linux](#plex-on-linux) ·
 [Everyday use](#everyday-use) · [Extras](#extras) · [Settings](#settings) ·
 [This PC only](#keeping-it-to-this-pc-only) · [Troubleshooting](#troubleshooting) ·
 [Security](#security) · [Why this design](#why-this-design)
@@ -253,6 +254,9 @@ network side is done. If it doesn't, see
 
 ### Connecting another Windows PC
 
+If that PC runs Plex, `.\windows\connect-plex.ps1` on the server PC does these steps
+for you - see [Plex on another Windows PC](#plex-on-another-windows-pc). By hand:
+
 On the other PC. It doesn't need Docker or a copy of your archives.
 
 **1. Install WinFsp and rclone,** then open a **new** PowerShell window:
@@ -371,6 +375,64 @@ Things to know:
   [Telling Plex about new files straight away](#telling-plex-about-new-files-straight-away).
 - **Video inside RARs is new to Plex.** Files Plex already knew keep their metadata;
   video it couldn't read before is added as new items.
+
+## Plex on another Windows PC
+
+If Plex runs on a different Windows PC than the one with the container, one script on
+the server PC does nearly all of it. The setup wizard offers to run it at the end, or
+run it yourself any time:
+
+```powershell
+.\windows\connect-plex.ps1
+```
+
+It asks for the Plex PC's IP address or name, then:
+
+1. **Opens this PC to your network:** removes `BIND=127.0.0.1` from `.env` if it's
+   there, adds this PC's address to `TLS_HOSTS`, and adds the Windows Firewall rule
+   (Windows asks for permission once).
+2. **Makes a login just for the Plex PC,** called `plex`, with a random password.
+3. **Gets a Plex token:** it shows a four-character code that you enter at
+   <https://plex.tv/link> while signed in to your Plex account. With the token it turns
+   off Plex's *Empty trash automatically after every scan* and writes `PLEX_URL`,
+   `PLEX_TOKEN` and `PLEX_PATH_MAP` to `.env`, so Plex is told about new files
+   [straight away](#telling-plex-about-new-files-straight-away). You can paste a token
+   instead, or skip this part.
+4. **Restarts the container** once with the new settings.
+5. **Copies a ready-made folder to the Plex PC** and tells you where it put it. The
+   folder holds the mount scripts, the certificate, the login and a `Setup.cmd`.
+
+**What's left for you, on the Plex PC:**
+
+1. Log in as the Windows user Plex runs as and open the folder the script named
+   (normally `C:\rar2fs-dock`).
+2. Double-click `Setup.cmd`. It installs WinFsp and rclone if they're missing, mounts
+   the drive as `Y:` and brings it back at every login.
+3. In Plex, add the drive's folders to your libraries (*Manage Library → Edit → Add
+   folders*). The script and `READ-ME.txt` in the folder list them, e.g. `Y:\films`.
+
+That last part can't be done from the server PC: Windows doesn't let one PC install
+things on another.
+
+**About the copy.** The script first tries the Plex PC's own `C:` drive over the
+network. Windows often refuses that on home PCs, so it then offers three ways on:
+
+- sign in with an administrator account of the Plex PC
+- copy to a shared folder on the Plex PC instead - on that PC, right-click any folder →
+  *Properties → Sharing → Share*, and allow changes
+- skip the copy: the folder is left in your Documents as `rar2fs-dock-plex`, to carry
+  over yourself. It holds a password, so delete that copy afterwards.
+
+Options: `-PlexHost 192.168.1.20` skips the question, `-Drive P:` uses another letter
+on the Plex PC, `-CopyTo \\192.168.1.20\Shared` names the shared folder up front,
+`-NoPlex` sets up the drive only, and `-DryRun` shows what it would do without changing
+anything. Running it again is safe; it makes a new password for the `plex` login and a
+fresh folder each time.
+
+The "things to know" under [Plex on the same Windows PC](#plex-on-the-same-windows-pc)
+apply here too, and
+[When the other machine can't connect](#when-the-other-machine-cant-connect) covers
+the network side.
 
 ## Plex on Linux
 
