@@ -1,0 +1,76 @@
+#!/bin/sh
+# Prints the library sections of the status page (overview, recently added, duplicates)
+# from /state/www/library.json. Called by status-page.
+lib=/state/www/library.json
+if [ ! -s "$lib" ]; then
+  echo '<section><h2>Library</h2><p class="none">Indexing… this appears a minute or two after the container starts.</p></section>'
+  exit 0
+fi
+[ -f /state/library.scanning ] && scanning=true || scanning=false
+
+jq -r --argjson scanning "$scanning" '
+  def h: if . == null then "-"
+         elif . >= 1099511627776 then "\((. / 109951162777.6 | round) / 10) TB"
+         elif . >= 1073741824    then "\((. / 107374182.4 | round) / 10) GB"
+         elif . >= 1048576       then "\(. / 1048576 | round) MB"
+         else "\(. / 1024 | round) KB" end;
+  def t: "<time data-t=\"\(.)\"></time>";
+  def e: tostring | @html;
+
+  # ---------------- overview ----------------
+  "<section><h2>Library</h2>",
+  (if $scanning then "<p><span class=\"badge wait\">scanning</span> Measuring sizes. This page updates when it finishes.</p>" else empty end),
+  (if .scan then
+     "<p><b>\(.scan.bytes | h)</b> in <b>\(.scan.items)</b> items (\(.scan.files) files). "
+     + (if .scan.packed_items > 0
+          then "<b>\(.scan.packed_items)</b> of them are in RAR archives. Unpacking those would need another <b>\(.scan.archive_bytes | h)</b> of disk; here they are readable as they are."
+          else "None of them are in RAR archives." end) + "</p>",
+     "<table><tr><th>Folder</th><th style=\"text-align:right\">Size</th><th style=\"text-align:right\">Items</th><th style=\"text-align:right\">In archives</th></tr>",
+     (.scan.folders[] | "<tr><td><code>\(.folder | e)</code></td><td class=\"n\">\(.bytes | h)</td><td class=\"n\">\(.items)</td><td class=\"n\">\(.packed_items)</td></tr>"),
+     "</table>",
+     "<h2 style=\"margin-top:16px\">Largest</h2><table>",
+     (.scan.largest[:8][] | "<tr><td>\(.path | e)</td><td class=\"n\">\(.bytes | h)</td></tr>"),
+     "</table>",
+     "<p class=\"sub\" style=\"margin:10px 0 0\">Sizes measured \(.scan.finished | t), in \(.scan.seconds) seconds.</p>"
+   else
+     "<p><b>\(.items)</b> items in \(.folders | length) folders. Sizes have not been measured yet.</p>",
+     "<table><tr><th>Folder</th><th style=\"text-align:right\">Items</th></tr>",
+     (.folders[] | "<tr><td><code>\(.folder | e)</code></td><td class=\"n\">\(.items)</td></tr>"),
+     "</table>"
+   end),
+  "<form method=\"post\" action=\"run-scan\" class=\"run\">"
+  + (if $scanning then "<button type=\"submit\" disabled>Scanning…</button>" else "<button type=\"submit\">Scan sizes</button>" end)
+  + " <span class=\"dim\">Reads the size of every file, so it takes a while on a large library.</span></form>",
+  "</section>",
+
+  # ---------------- recently added ----------------
+  "<section><h2>Recently added</h2>",
+  (if (.recent | length) > 0 then
+     "<table><tr><th>When</th><th>Name</th><th>Folder</th></tr>",
+     (.recent[:10][] | "<tr><td style=\"white-space:nowrap\">\(.time | t)</td><td>\(.name | e)</td><td><code>\(.folder | e)</code></td></tr>"),
+     "</table><p class=\"sub\" style=\"margin:10px 0 0\">The newest 20 are also an <a href=\"recent.xml\">RSS feed</a>.</p>"
+   else "<p class=\"none\">Nothing yet.</p>" end),
+  "</section>",
+
+  # ---------------- duplicates ----------------
+  "<section><h2>Duplicates</h2>",
+  (.duplicates as $d
+   | if $d.exact_count == 0 and $d.versions_count == 0 then "<p class=\"none\">None found.</p>"
+     else
+       "<p><b>\($d.exact_count)</b> items exist in more than one place"
+       + (if $d.exact_bytes != null and $d.exact_bytes > 0 then ", taking up about <b>\($d.exact_bytes | h)</b> extra" else "" end)
+       + ". <b>\($d.versions_count)</b> titles have more than one release. <a href=\"duplicates.txt\">Full list</a></p>",
+       (if $d.exact_count > 0 then
+          "<table><tr><th>Same name in more than one place</th><th>Where</th><th style=\"text-align:right\">Size</th></tr>",
+          ($d.exact[:8][] | "<tr><td>\(.name | e)</td><td>\(.places | map("<code>\(e)</code>") | join(" "))</td><td class=\"n\">\(.bytes | h)</td></tr>"),
+          "</table>"
+        else empty end),
+       (if $d.versions_count > 0 then
+          "<h2 style=\"margin-top:16px\">Different releases of the same title</h2><table>",
+          ($d.versions[:6][] | "<tr><td style=\"white-space:nowrap\">\(.title | e)</td><td>\(.releases | map("\(.name | e) <span class=\"dim\">in \(.folder | e)\(if .bytes then ", \(.bytes | h)" else "" end)</span>") | join("<br>"))</td></tr>"),
+          "</table>"
+        else empty end),
+       (if $d.exact_bytes == null then "<p class=\"sub\" style=\"margin:10px 0 0\">Sizes appear after a size scan.</p>" else empty end)
+     end),
+  "</section>"
+' "$lib"

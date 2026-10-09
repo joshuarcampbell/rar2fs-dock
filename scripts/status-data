@@ -49,6 +49,15 @@ if [ -s /state/events.log ]; then
   done
 fi
 
+# ---- library (from library-index and library-scan) ----
+lib=$www/library.json
+if [ -s "$lib" ]; then
+  l_items=$(jq '.items // null' "$lib"); l_dupes=$(jq '.duplicates.exact_count // null' "$lib")
+  l_bytes=$(jq '.scan.bytes // null' "$lib")
+else
+  l_items=null; l_dupes=null; l_bytes=null
+fi
+
 on() { [ "$1" = "$2" ] && echo true || echo false; }
 if [ -n "$PLEX_URL" ] && [ -n "$PLEX_TOKEN" ]; then plex=true; else plex=false; fi
 if [ -n "$NOTIFY_URL" ]; then notify=true; else notify=false; fi
@@ -65,6 +74,7 @@ jq -n \
   --argjson c_orphan "$(num "$(count 'RAR parts with no main .rar file')")" \
   --argjson c_unreadable "$(num "$(count 'Folders with archives that could not be opened')")" \
   --argjson restarts "$restarts" \
+  --argjson l_items "$l_items" --argjson l_dupes "$l_dupes" --argjson l_bytes "$l_bytes" \
   --argjson https "$(on "${TLS:-1}" 1)" --argjson short "$(on "${SHORT_PATHS:-0}" 1)" \
   --argjson auto_restart "$(on "${AUTO_RESTART:-1}" 1)" --argjson plex "$plex" --argjson notify "$notify" '
   {empty_folders: $c_empty, missing_parts: $c_missing, orphan_parts: $c_orphan, unreadable: $c_unreadable} as $counts
@@ -79,6 +89,9 @@ jq -n \
       updates_available: ([$unrar_update, $rar2fs_update] | map(select(.)) | length),
       report_problems: (if $r_finished == null then null else ($counts | map(. // 0) | add) end),
       restarts_last_hour: $restarts,
+      library_items: $l_items,
+      library_bytes: $l_bytes,
+      duplicates: $l_dupes,
       folders: $folders,
       versions: {
         unrar:  {installed: $unrar,  latest: (if $unrar_latest  == "" then null else $unrar_latest  end), update_available: $unrar_update},
@@ -119,6 +132,19 @@ jq -r '
     "# HELP rar2fs_dock_report_problems Problems found by the last health report, by kind.",
     "# TYPE rar2fs_dock_report_problems gauge",
     (.report.counts | to_entries[] | "rar2fs_dock_report_problems{kind=\"\(.key)\"} \(.value // 0)")
+  end),
+  (if .library_items == null then empty else
+    "# HELP rar2fs_dock_library_items Items at the top level of the shared folders.",
+    "# TYPE rar2fs_dock_library_items gauge",
+    "rar2fs_dock_library_items \(.library_items)",
+    "# HELP rar2fs_dock_duplicates Items that exist in more than one place.",
+    "# TYPE rar2fs_dock_duplicates gauge",
+    "rar2fs_dock_duplicates \(.duplicates // 0)"
+  end),
+  (if .library_bytes == null then empty else
+    "# HELP rar2fs_dock_library_bytes Total size of the shared folders at the last size scan.",
+    "# TYPE rar2fs_dock_library_bytes gauge",
+    "rar2fs_dock_library_bytes \(.library_bytes)"
   end),
   "# HELP rar2fs_dock_restarts_last_hour Automatic restarts in the last hour.",
   "# TYPE rar2fs_dock_restarts_last_hour gauge",

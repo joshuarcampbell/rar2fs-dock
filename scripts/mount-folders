@@ -1,0 +1,157 @@
+#!/bin/sh
+# Mounts the source folders through rar2fs at /view/<name>.
+#
+#   mount-folders start     mount everything (run once by the entrypoint)
+#   mount-folders reload    mount what was added, unmount what was removed, and remount
+#                           what changed - without touching the folders that didn't
+#   mount-folders stop      unmount everything
+#
+# Folders come from two places:
+#
+#   1. Volumes in docker-compose.override.yml, mounted at /sources/<name>. Docker fixes
+#      these when the container is created, so changing them needs a restart.
+#   2. Lines in config/folders.conf:   <name> = <path inside the container>
+#      for example                      concerts = /drives/e/Concerts
+#      These can be added and removed while the container runs ("reload"). The path has
+#      to be somewhere the container can already see - usually a whole drive mounted
+#      once at /drives/<letter> (see README, "Adding folders without a restart").
+#
+# The same name more than once (or name@label) merges those folders into one, via
+# mergerfs. NESTED_RAR=1 runs rar2fs twice so archives inside archives open too.
+#
+# Bookkeeping, all in /tmp:
+#   mounts.expected   every mountpoint made - the health check tests each one
+#   folders.state     name<TAB>members, for the folders currently mounted
+#   sources.map       <path under the drive><TAB><real folder>, for the library index
+
+EXPECTED=/tmp/mounts.expected
+STATE=/tmp/folders.state
+MAP=/tmp/sources.map
+CONF=/config/folders.conf
+TAB=$(printf '\t')
+
+say() { echo "mount-folders: $*"; }
+
+# What should be mounted: one line per name, "name<TAB>member:member..."
+plan() {
+  {
+    for src in /sources/*/; do
+      [ -d "$src" ] || continue
+      base=$(basename "$src")
+      printf '%s\t%s\n' "${base%%@*}" "/sources/$base"
+    done
+    if [ -f "$CONF" ]; then
+      tr -d '\r' < "$CONF" | sed 's/^[[:space:]]*//' | while IFS= read -r line; do
+        case "$line" in ''|'#'*) continue ;; esac       # blank lines and comments
+        case "$line" in *=*) ;; *) continue ;; esac
+        key=$(printf '%s' "${line%%=*}" | sed 's/[[:space:]]*$//')
+        path=$(printf '%s' "${line#*=}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s|/*$||')
+        name=${key%%@*}
+        case "$name" in ''|*[!A-Za-z0-9._-]*) say "folders.conf: '$key' is not a usable name - skipped" >&2; continue ;; esac
+        case "$path" in /*) ;; *) say "folders.conf: '$path' must start with / - skipped" >&2; continue ;; esac
+        case "$path" in *:*) say "folders.conf: '$path' contains ':' - skipped" >&2; continue ;; esac
+        [ -d "$path" ] || { say "folders.conf: $path does not exist in the container - skipped" >&2; continue; }
+        printf '%s\t%s\n' "$name" "$path"
+      done
+    fi
+  } | sort -u | awk -F '\t' '
+      { m[$1] = (m[$1] == "" ? $2 : m[$1] ":" $2) }
+      END { for (n in m) printf "%s\t%s\n", n, m[n] }' | sort
+}
+
+mount_name() {  # name, members
+  name=$1; members=$2
+  case "$members" in
+    *:*)
+      src="/merged/$name"; mkdir -p "$src"
+      say "mergerfs: $members -> $src"
+      mergerfs -o allow_other,ro,category.search=ff,cache.files=off "$members" "$src" || { say "ERROR: could not merge $name"; return 1; }
+      echo "$src" >> "$EXPECTED" ;;
+    *) src=$members ;;
+  esac
+  if [ "${NESTED_RAR:-1}" = "1" ]; then
+    mkdir -p "/pass1/$name"
+    rar2fs -o allow_other,ro $RAR2FS_OPTS "$src" "/pass1/$name" || { say "ERROR: could not mount $name"; return 1; }
+    echo "/pass1/$name" >> "$EXPECTED"
+    src="/pass1/$name"
+  fi
+  mkdir -p "/view/$name"
+  echo "rar2fs: $src -> /view/$name"
+  rar2fs -o allow_other,ro $RAR2FS_OPTS "$src" "/view/$name" || { say "ERROR: could not mount $name"; return 1; }
+  echo "/view/$name" >> "$EXPECTED"
+  printf '%s\t%s\n' "$name" "$members" >> "$STATE"
+}
+
+unmount_name() {  # name
+  name=$1
+  for m in "/view/$name" "/pass1/$name" "/merged/$name"; do
+    grep -qxF "$m" "$EXPECTED" 2>/dev/null || continue
+    fusermount -u "$m" 2>/dev/null || fusermount -uz "$m" 2>/dev/null || true
+    rmdir "$m" 2>/dev/null || true
+    grep -vxF "$m" "$EXPECTED" > "$EXPECTED.tmp"; mv "$EXPECTED.tmp" "$EXPECTED"
+  done
+  awk -F '\t' -v n="$name" '$1 != n' "$STATE" > "$STATE.tmp"; mv "$STATE.tmp" "$STATE"
+  say "unmounted $name"
+}
+
+# Where each part of the drive really lives. A folder made of sub-volumes
+# (/sources/films/films-1, /sources/films/films-2) is listed per sub-volume.
+write_map() {
+  : > "$MAP.tmp"
+  while IFS="$TAB" read -r name members; do
+    printf '%s\n' "$members" | tr ':' '\n' | while IFS= read -r member; do
+      subs=$(awk -v a="$member/" 'index($5, a) == 1 { print $5 }' /proc/self/mountinfo | sed 's/[\]040/ /g' | sort -u)
+      if [ -n "$subs" ]; then
+        printf '%s\n' "$subs" | while IFS= read -r sub; do printf '%s\t%s\n' "$name${sub#"$member"}" "$sub" >> "$MAP.tmp"; done
+      else
+        printf '%s\t%s\n' "$name" "$member" >> "$MAP.tmp"
+      fi
+    done
+  done < "$STATE"
+  mv "$MAP.tmp" "$MAP"
+}
+
+case "${1:-}" in
+  start)
+    mkdir -p /view /merged /pass1
+    : > "$EXPECTED"; : > "$STATE"
+    plan > /tmp/folders.plan
+    while IFS="$TAB" read -r name members; do
+      mount_name "$name" "$members" < /dev/null || true
+    done < /tmp/folders.plan
+    [ -s "$STATE" ] || echo "WARNING: no folders to share - add some to docker-compose.override.yml (see README)"
+    write_map
+    ;;
+  reload)
+    touch "$EXPECTED" "$STATE"
+    plan > /tmp/folders.plan
+    changed=0
+    # gone, or made of different folders now: unmount (a changed one is mounted again below)
+    cp "$STATE" /tmp/folders.before
+    while IFS="$TAB" read -r name members; do
+      wanted=$(awk -F '\t' -v n="$name" '$1 == n { print $2 }' /tmp/folders.plan)
+      if [ "$wanted" != "$members" ]; then unmount_name "$name" < /dev/null; changed=1; fi
+    done < /tmp/folders.before
+    rm -f /tmp/folders.before
+    # new
+    while IFS="$TAB" read -r name members; do
+      if ! awk -F '\t' -v n="$name" '$1 == n { found = 1 } END { exit !found }' "$STATE"; then
+        mount_name "$name" "$members" < /dev/null && changed=1
+      fi
+    done < /tmp/folders.plan
+    write_map
+    if [ "$changed" = 1 ]; then
+      say "now sharing: $(cut -f1 "$STATE" | tr '\n' ' ')"
+      status-page 2>/dev/null || true
+      library-index > /dev/null 2>&1 &
+    else
+      say "nothing to change. Sharing: $(cut -f1 "$STATE" | tr '\n' ' ')"
+    fi
+    ;;
+  stop)
+    [ -f "$EXPECTED" ] || exit 0
+    tac "$EXPECTED" | while IFS= read -r m; do fusermount -u "$m" 2>/dev/null || fusermount -uz "$m" 2>/dev/null || true; done
+    ;;
+  plan) plan ;;
+  *) echo "usage: mount-folders start|reload|stop"; exit 1 ;;
+esac

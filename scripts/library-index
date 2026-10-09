@@ -1,0 +1,252 @@
+#!/usr/bin/env python3
+"""Builds a quick index of what is on the drive, for the status page.
+
+It lists the top two levels of every shared folder (names and dates only - a few
+seconds, even for a large library) and from that works out:
+
+  - what was added most recently            -> status page, and /recent.xml (RSS)
+  - what exists in more than one place      -> status page, and /duplicates.txt
+  - the list that /search looks through
+
+Run every few minutes by `monitor`, and after `mount-folders reload`. Sizes are a
+separate, slower job (`library-scan`); if it has run, its results are folded in here.
+
+Files:  /state/library/items.tsv     depth, time, kind, folder, path-in-folder
+        /state/www/library.json      the summary the status page shows
+        /state/www/recent.xml        the newest items as an RSS feed
+        /state/www/duplicates.txt    the full list of duplicates
+"""
+import json
+import os
+import re
+import time
+from email.utils import formatdate
+from xml.sax.saxutils import escape
+
+MAP = '/tmp/sources.map'
+LIB = '/state/library'
+WWW = '/state/www'
+SKIP = {'@recycle', '#recycle', '$recycle.bin', 'system volume information', 'thumbs.db',
+        'desktop.ini', '.ds_store', 'sample', 'proof'}
+SKIP_EXT = ('.sfv', '.nfo', '.txt', '.jpg', '.png', '.url')
+
+EPISODE = re.compile(r'^(?P<t>.+?)[\s._-]+s(?P<s>\d{1,2})[\s._-]?e(?P<e>\d{1,3})(?=\D|$)', re.I)
+SEASON = re.compile(r'^(?P<t>.+?)[\s._-]+s(?P<s>\d{1,2})(?=[\s._-]|$)', re.I)
+YEAR = re.compile(r'^(?P<t>.+?)[\s._(\[-]+(?P<y>(?:19|20)\d{2})(?=[\s._)\]-]|$)')
+
+
+def clean(title):
+    return re.sub(r'[\s._-]+', ' ', title).strip().lower()
+
+
+def title_key(name):
+    """A key shared by different releases of the same film, episode or season."""
+    m = EPISODE.match(name)
+    if m:
+        return '%s s%02de%02d' % (clean(m.group('t')), int(m.group('s')), int(m.group('e'))), 'episode'
+    m = SEASON.match(name)
+    if m:
+        return '%s s%02d' % (clean(m.group('t')), int(m.group('s'))), 'season'
+    m = YEAR.match(name)
+    if m:
+        return '%s (%s)' % (clean(m.group('t')), m.group('y')), 'title'
+    return None, None
+
+
+def stem(name, is_dir):
+    if is_dir:
+        return name
+    base, ext = os.path.splitext(name)
+    return base if 0 < len(ext) <= 5 else name
+
+
+def source_parts():
+    """[(folder, real path, place)] from the map mount-folders writes.
+
+    `place` says where an item really is. It is the folder's name, except in a merged
+    folder, where it also names the part: two parts holding the same item is a
+    duplicate that the merged view would otherwise hide."""
+    pairs = []
+    try:
+        for line in open(MAP, encoding='utf-8', errors='surrogateescape').read().splitlines():
+            folder, _, root = line.partition('\t')
+            if root and (folder, root) not in pairs:
+                pairs.append((folder, root))
+    except OSError:
+        pass
+    count = {}
+    for folder, _ in pairs:
+        count[folder] = count.get(folder, 0) + 1
+    parts = []
+    for folder, root in pairs:
+        place = folder
+        if count[folder] > 1:
+            place = '%s [%s]' % (folder, os.path.basename(root) if root.startswith('/sources/') else root)
+        parts.append((folder, root, place))
+    return parts
+
+
+def listing():
+    """Yield (depth, mtime, kind, folder, relpath, place) for the top two levels."""
+    for folder, root, place in source_parts():
+        try:
+            top = list(os.scandir(root))
+        except OSError:
+            continue
+        for entry in top:
+            low = entry.name.lower()
+            if low in SKIP or low.startswith('.'):
+                continue
+            try:
+                is_dir = entry.is_dir()
+                mtime = int(entry.stat().st_mtime)
+            except OSError:
+                continue
+            if not is_dir and low.endswith(SKIP_EXT):
+                continue
+            yield 1, mtime, 'd' if is_dir else 'f', folder, entry.name, place
+            if not is_dir:
+                continue
+            try:                                        # second level: folders only
+                for sub in os.scandir(entry.path):
+                    if sub.name.lower() in SKIP or sub.name.startswith('.'):
+                        continue
+                    try:
+                        if sub.is_dir():
+                            yield 2, int(sub.stat().st_mtime), 'd', folder, entry.name + '/' + sub.name, place
+                    except OSError:
+                        pass
+            except OSError:
+                pass
+
+
+def human(n):
+    for unit in ('bytes', 'KB', 'MB', 'GB', 'TB'):
+        if n < 1024 or unit == 'TB':
+            return ('%d %s' % (n, unit)) if unit == 'bytes' else ('%.1f %s' % (n, unit))
+        n /= 1024.0
+
+
+def main():
+    os.makedirs(LIB, exist_ok=True)
+    os.makedirs(WWW, exist_ok=True)
+    items = list(listing())
+
+    # what /search looks through: one line per item as it appears on the drive
+    shown = {}
+    for depth, mtime, kind, folder, rel, _ in items:
+        key = (folder, rel)
+        if key not in shown or mtime > shown[key][1]:
+            shown[key] = (depth, mtime, kind)
+    with open(LIB + '/items.tsv.tmp', 'w', encoding='utf-8', errors='surrogateescape') as f:
+        for (folder, rel), (depth, mtime, kind) in sorted(shown.items(), key=lambda kv: (kv[0][0], kv[0][1].lower())):
+            f.write('%d\t%d\t%s\t%s\t%s\n' % (depth, mtime, kind, folder, rel))
+    os.replace(LIB + '/items.tsv.tmp', LIB + '/items.tsv')
+
+    top = [i for i in items if i[0] == 1]
+    top_shown = {key: value for key, value in shown.items() if value[0] == 1}
+
+    sizes = {}                                          # from library-scan, if it has run
+    try:
+        for line in open(LIB + '/sizes.tsv', encoding='utf-8', errors='surrogateescape'):
+            path, size = line.rstrip('\n').split('\t')[:2]
+            sizes[path] = int(size)
+    except (OSError, ValueError):
+        pass
+
+    # ---- recently added ----
+    recent = [{'name': rel, 'folder': folder, 'time': value[1]}
+              for (folder, rel), value in sorted(top_shown.items(), key=lambda kv: -kv[1][1])[:20]]
+
+    # ---- duplicates ----
+    by_name, by_title = {}, {}
+    for _, mtime, kind, folder, rel, place in top:
+        by_name.setdefault(stem(rel, kind == 'd').lower(), []).append((place, rel, folder))
+        key, what = title_key(stem(rel, kind == 'd'))
+        if key:
+            by_title.setdefault((key, what), []).append((place, rel, folder))
+
+    exact = []
+    for name, places in by_name.items():
+        if len(places) > 1:
+            entry = {'name': places[0][1], 'places': sorted(p[0] for p in places)}
+            size = sizes.get(places[0][2] + '/' + places[0][1])
+            if size is not None:
+                entry['bytes'] = size
+            exact.append(entry)
+    exact.sort(key=lambda e: (-e.get('bytes', 0), e['name'].lower()))
+
+    versions = []
+    for (key, what), places in by_title.items():
+        if len({stem(rel, True).lower() for _, rel, _ in places}) > 1:     # same title, different names
+            releases = []
+            for place, rel, folder in places:
+                release = {'name': rel, 'folder': place}
+                if folder + '/' + rel in sizes:
+                    release['bytes'] = sizes[folder + '/' + rel]
+                releases.append(release)
+            versions.append({'title': key, 'kind': what,
+                             'releases': sorted(releases, key=lambda r: r['name'].lower())})
+    versions.sort(key=lambda v: v['title'])
+
+    with open(WWW + '/duplicates.txt.tmp', 'w', encoding='utf-8', errors='replace') as f:
+        f.write('Duplicates on the drive - generated %s\n' % time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime()))
+        f.write('\n== The same name in more than one place: %d\n' % len(exact))
+        for e in exact:
+            f.write('  %s%s\n' % (e['name'], ('   [%s each]' % human(e['bytes'])) if 'bytes' in e else ''))
+            for place in e['places']:
+                f.write('      in %s\n' % place)
+        f.write('\n== Different releases of the same title: %d\n' % len(versions))
+        for v in versions:
+            f.write('  %s\n' % v['title'])
+            for r in v['releases']:
+                f.write('      %s/%s%s\n' % (r['folder'], r['name'], ('   [%s]' % human(r['bytes'])) if 'bytes' in r else ''))
+        if not sizes:
+            f.write('\nSizes appear here after a size scan (the "Scan sizes" button on the status page).\n')
+    os.replace(WWW + '/duplicates.txt.tmp', WWW + '/duplicates.txt')
+
+    # ---- summary for the status page ----
+    counts = {}
+    for folder, _ in top_shown:
+        counts[folder] = counts.get(folder, 0) + 1
+    scan = None
+    try:
+        scan = json.load(open(LIB + '/scan.json', encoding='utf-8'))
+    except (OSError, ValueError):
+        pass
+    wasted = sum(e['bytes'] * (len(e['places']) - 1) for e in exact if 'bytes' in e)
+    summary = {
+        'generated': int(time.time()),
+        'items': len(top_shown),
+        'folders': [{'folder': k, 'items': v} for k, v in sorted(counts.items())],
+        'recent': recent,
+        'duplicates': {'exact_count': len(exact), 'versions_count': len(versions),
+                       'exact_bytes': wasted if sizes else None,
+                       'exact': exact[:10], 'versions': versions[:10]},
+        'scan': scan,
+        'scanning': os.path.exists('/state/library.scanning'),
+    }
+    with open(WWW + '/library.json.tmp', 'w', encoding='utf-8', errors='replace') as f:
+        json.dump(summary, f, indent=1)
+    os.replace(WWW + '/library.json.tmp', WWW + '/library.json')
+
+    # ---- RSS ----
+    with open(WWW + '/recent.xml.tmp', 'w', encoding='utf-8', errors='replace') as f:
+        f.write('<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0"><channel>\n')
+        f.write('<title>rar2fs-dock - recently added</title>\n<link>status.html</link>\n')
+        f.write('<description>The newest items on the drive</description>\n')
+        f.write('<lastBuildDate>%s</lastBuildDate>\n' % formatdate(time.time()))
+        for r in recent:
+            f.write('<item><title>%s</title><description>In %s</description><pubDate>%s</pubDate>'
+                    '<guid isPermaLink="false">%s</guid></item>\n'
+                    % (escape(r['name']), escape(r['folder']), formatdate(r['time']),
+                       escape('%s/%s@%d' % (r['folder'], r['name'], r['time']))))
+        f.write('</channel></rss>\n')
+    os.replace(WWW + '/recent.xml.tmp', WWW + '/recent.xml')
+
+    print('library-index: %d items in %d folders, %d duplicates, %d titles with several releases'
+          % (len(top_shown), len(counts), len(exact), len(versions)))
+
+
+if __name__ == '__main__':
+    main()

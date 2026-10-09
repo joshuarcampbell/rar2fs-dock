@@ -4,17 +4,21 @@
   GET  /status.html, /health-report.txt ...   files from /state/www
   GET  /status.json                           the same data for dashboards
   GET  /metrics                               the numbers, in Prometheus format
+  GET  /recent.xml                            the newest items, as an RSS feed
+  GET  /search?q=...                          looks through the library index
   POST /run-report  (form field: folder)      starts `run-health-report [folder]`
+  POST /run-scan                              starts `library-scan` (sizes)
 
 Every request needs a login from the same list as the drive (/tmp/htpasswd). The one
-exception: if STATUS_TOKEN is set, /status.json and /metrics also accept ?token=...,
-for dashboards that can't send a user name and password. The token can only read
-those two; it can't open the page or start anything.
+exception: if STATUS_TOKEN is set, /status.json, /metrics and /recent.xml also accept
+?token=..., for dashboards and feed readers that can't send a user name and password.
+The token can only read those three; it can't open the page or start anything.
 It serves HTTPS using /tls/cert.pem and /tls/key.pem, unless TLS=0.
 """
 import base64
 import hashlib
 import hmac
+import html
 import os
 import re
 import ssl
@@ -29,10 +33,13 @@ HTPASSWD = '/tmp/htpasswd'
 VIEW = '/view'
 RUNNING = '/state/report.running'
 STATUS_TOKEN = os.environ.get('STATUS_TOKEN', '')
-TOKEN_PATHS = ('/status.json', '/metrics')      # all a token can read
+TOKEN_PATHS = ('/status.json', '/metrics', '/recent.xml')      # all a token can read
+ITEMS = '/state/library/items.tsv'
+SCANNING = '/state/library.scanning'
+CSS = '/usr/local/bin/page.css'
 METRICS_TYPE = 'text/plain; version=0.0.4; charset=utf-8'
 TYPES = {'.html': 'text/html; charset=utf-8', '.txt': 'text/plain; charset=utf-8',
-         '.json': 'application/json', '.css': 'text/css'}
+         '.json': 'application/json', '.css': 'text/css', '.xml': 'application/rss+xml; charset=utf-8'}
 FOLDER_OK = re.compile(r'^[^\x00-\x1f\\]{1,300}$')
 
 _good = {}                  # sha256 of an accepted Authorization header -> expiry time
@@ -124,6 +131,8 @@ class Handler(BaseHTTPRequestHandler):
         path = url.path
         if path in ('', '/'):
             return self._send(302, headers=[('Location', 'status.html')])
+        if path == '/search':
+            return self._search(urllib.parse.parse_qs(url.query).get('q', [''])[0])
         if path == '/metrics':
             full = os.path.join(WWW, 'metrics.txt')
             if not os.path.isfile(full):
@@ -140,10 +149,62 @@ class Handler(BaseHTTPRequestHandler):
 
     do_HEAD = do_GET
 
+    def _search(self, query):
+        """A results page for /search?q=... - every word must appear in the name."""
+        query = query.strip()[:200]
+        words = [w for w in query.lower().split() if w]
+        hits, total = [], 0
+        if words:
+            try:
+                with open(ITEMS, encoding='utf-8', errors='replace') as f:
+                    for line in f:
+                        parts = line.rstrip('\n').split('\t')
+                        if len(parts) < 5:
+                            continue
+                        name = parts[4].lower()
+                        if all(w in name for w in words):
+                            total += 1
+                            if len(hits) < 200:
+                                hits.append(parts)
+            except OSError:
+                pass
+        hits.sort(key=lambda p: (int(p[0]), p[4].lower()))
+        try:
+            css = open(CSS, encoding='utf-8').read()
+        except OSError:
+            css = ''
+        e = html.escape
+        rows = ''.join(
+            '<tr><td>%s%s</td><td><code>%s</code></td><td style="white-space:nowrap"><time data-t="%s"></time></td></tr>\n'
+            % (e(p[4].replace('/', ' \u203a ')), '' if p[2] == 'd' else ' <span class="dim">(file)</span>', e(p[3]), e(p[1]))
+            for p in hits)
+        if not words:
+            summary = 'Type part of a name above.'
+        elif not total:
+            summary = 'Nothing found for <b>%s</b>. The index covers the top two levels of each folder.' % e(query)
+        else:
+            summary = '<b>%d</b> found for <b>%s</b>%s' % (total, e(query), ' - showing the first 200' if total > 200 else '')
+        page = (
+            '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width, initial-scale=1"><title>Search - rar2fs-dock</title>'
+            '<style>%s</style></head><body><main>'
+            '<h1>Search</h1><p class="sub"><a href="status.html">&larr; Back to the status page</a></p>'
+            '<form method="get" action="search" class="run" style="margin:0 0 16px">'
+            '<input type="search" name="q" value="%s" placeholder="Search the library by name" required autofocus> '
+            '<button type="submit">Search</button></form>'
+            '<section><p>%s</p>%s</section>'
+            '<script>for(const t of document.querySelectorAll("time[data-t]")){const d=new Date(t.dataset.t*1000);'
+            'if(!isNaN(d)){t.textContent=d.toLocaleDateString();t.dateTime=d.toISOString()}}</script>'
+            '</main></body></html>'
+        ) % (css, e(query), summary,
+             ('<table><tr><th>Name</th><th>Folder</th><th>Added</th></tr>%s</table>' % rows) if rows else '')
+        self._send(200, page.encode('utf-8'), 'text/html; charset=utf-8')
+
     def do_POST(self):
         if not self._authorised():
             return
-        if urllib.parse.urlparse(self.path).path != '/run-report':
+        action = urllib.parse.urlparse(self.path).path
+        if action not in ('/run-report', '/run-scan'):
             return self._send(404, b'Not found\n')
         # The browser sends the login by itself, so make sure the request was made
         # from this page and not by some other site the user happens to have open.
@@ -152,6 +213,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, b'This action can only be started from the status page.\n')
         length = min(int(self.headers.get('Content-Length') or 0), 4096)
         form = urllib.parse.parse_qs(self.rfile.read(length).decode('utf-8', 'replace'))
+        if action == '/run-scan':
+            return self._start_scan()
         folder = (form.get('folder') or [''])[0].strip().strip('/')
         if folder:
             real = os.path.realpath(os.path.join(VIEW, folder))
@@ -171,6 +234,24 @@ class Handler(BaseHTTPRequestHandler):
         while time.monotonic() < deadline:
             finished = os.path.exists(report) and os.path.getmtime(report) > before
             if os.path.exists(RUNNING) or finished:
+                break
+            time.sleep(0.1)
+        try:
+            subprocess.run(['status-page'], timeout=60, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+        self._send(303, headers=[('Location', 'status.html')])
+
+
+    def _start_scan(self):
+        """Start a size scan in the background, then show the page once it is under way."""
+        scan = '/state/library/scan.json'
+        before = os.path.getmtime(scan) if os.path.exists(scan) else 0
+        subprocess.run(['sh', '-c', 'library-scan > /dev/null 2>&1 &'], timeout=10)
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            finished = os.path.exists(scan) and os.path.getmtime(scan) > before
+            if os.path.exists(SCANNING) or finished:
                 break
             time.sleep(0.1)
         try:

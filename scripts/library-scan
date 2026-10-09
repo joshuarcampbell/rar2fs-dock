@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""Measures the library: how big each item is, and how much of it is in archives.
+
+This reads the size of every file, so on a large library it takes a while (minutes).
+It runs at low priority, on demand ("Scan sizes" on the status page) and after each
+scheduled health report. Only one runs at a time.
+
+Files:  /state/library/sizes.tsv   path-on-drive, bytes, files, bytes-in-archives
+        /state/library/scan.json   totals per folder, the largest items, when it ran
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+MAP = '/tmp/sources.map'
+LIB = '/state/library'
+LOCK = '/state/library.scanning'
+SKIP = {'@recycle', '#recycle', '$recycle.bin', 'system volume information', '.qsyncclient'}
+ARCHIVE = re.compile(r'\.(rar|r\d{2,3})$', re.I)
+
+
+def measure(path):
+    """(bytes, files, bytes in RAR volumes) for one file or folder."""
+    total = files = packed = 0
+    if not os.path.isdir(path):
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            return 0, 0, 0
+        return size, 1, size if ARCHIVE.search(path) else 0
+    for folder, subfolders, names in os.walk(path, onerror=lambda e: None):
+        subfolders[:] = [d for d in subfolders if d.lower() not in SKIP]
+        for name in names:
+            try:
+                size = os.lstat(os.path.join(folder, name)).st_size
+            except OSError:
+                continue
+            total += size
+            files += 1
+            if ARCHIVE.search(name):
+                packed += size
+    return total, files, packed
+
+
+def main():
+    try:
+        fd = os.open(LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        print('a size scan is already running')
+        return 1
+    os.write(fd, str(int(time.time())).encode())
+    os.close(fd)
+    try:
+        os.nice(19)
+    except OSError:
+        pass
+    started = time.time()
+    try:
+        subprocess.run(['status-page'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)   # show "scanning"
+        os.makedirs(LIB, exist_ok=True)
+        pairs = []
+        for line in open(MAP, encoding='utf-8', errors='surrogateescape').read().splitlines():
+            folder, _, root = line.partition('\t')
+            if root and (folder, root) not in pairs:
+                pairs.append((folder, root))
+
+        items = {}          # path on the drive -> [bytes, files, packed bytes]
+        for folder, root in pairs:
+            try:
+                entries = list(os.scandir(root))
+            except OSError:
+                continue
+            for entry in entries:
+                if entry.name.lower() in SKIP or entry.name.startswith('.'):
+                    continue
+                size, files, packed = measure(entry.path)
+                slot = items.setdefault(folder + '/' + entry.name, [0, 0, 0])
+                if size > slot[0]:                      # merged parts: count the copy the drive shows
+                    slot[0], slot[1], slot[2] = size, files, packed
+
+        with open(LIB + '/sizes.tsv.tmp', 'w', encoding='utf-8', errors='surrogateescape') as f:
+            for path, (size, files, packed) in sorted(items.items()):
+                f.write('%s\t%d\t%d\t%d\n' % (path, size, files, packed))
+        os.replace(LIB + '/sizes.tsv.tmp', LIB + '/sizes.tsv')
+
+        folders = {}
+        for path, (size, files, packed) in items.items():
+            top = path.split('/')[0]
+            slot = folders.setdefault(top, {'folder': top, 'bytes': 0, 'items': 0, 'files': 0,
+                                            'packed_items': 0, 'archive_bytes': 0})
+            slot['bytes'] += size
+            slot['items'] += 1
+            slot['files'] += files
+            slot['archive_bytes'] += packed
+            if packed:
+                slot['packed_items'] += 1
+        largest = sorted(items.items(), key=lambda kv: -kv[1][0])[:15]
+        summary = {
+            'finished': int(time.time()),
+            'seconds': int(time.time() - started),
+            'bytes': sum(f['bytes'] for f in folders.values()),
+            'items': len(items),
+            'files': sum(f['files'] for f in folders.values()),
+            'packed_items': sum(f['packed_items'] for f in folders.values()),
+            # what unpacking everything would cost: the archives' contents again, beside the archives
+            'archive_bytes': sum(f['archive_bytes'] for f in folders.values()),
+            'folders': sorted(folders.values(), key=lambda f: f['folder']),
+            'largest': [{'path': path, 'bytes': value[0]} for path, value in largest],
+        }
+        with open(LIB + '/scan.json.tmp', 'w', encoding='utf-8', errors='replace') as f:
+            json.dump(summary, f, indent=1)
+        os.replace(LIB + '/scan.json.tmp', LIB + '/scan.json')
+        print('library-scan: %d items, %d files, %.1f GB in %d s'
+              % (summary['items'], summary['files'], summary['bytes'] / 1e9, summary['seconds']))
+    finally:
+        os.remove(LOCK)
+        subprocess.run(['library-index'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(['status-page'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
