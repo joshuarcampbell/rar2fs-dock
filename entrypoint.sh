@@ -16,6 +16,8 @@ set -e
 # mount-folders does the work, so the same code can add or remove a folder later
 # ("mount-folders reload") without restarting the container.
 EXPECTED=/tmp/mounts.expected
+# Tidies up if start-up stops part-way. Once the last line hands over to rclone (exec)
+# this no longer applies; when the container ends, its mounts end with it.
 trap 'mount-folders stop' EXIT INT TERM
 mount-folders start < /dev/null
 

@@ -5,6 +5,8 @@
 #   mount-folders reload    mount what was added, unmount what was removed, and remount
 #                           what changed - without touching the folders that didn't
 #   mount-folders stop      unmount everything
+#   mount-folders plan      print what should be mounted, and complain about bad lines
+#                           in folders.conf, without mounting anything (used by doctor)
 #
 # Folders come from two places:
 #
@@ -153,5 +155,5 @@ case "${1:-}" in
     tac "$EXPECTED" | while IFS= read -r m; do fusermount -u "$m" 2>/dev/null || fusermount -uz "$m" 2>/dev/null || true; done
     ;;
   plan) plan ;;
-  *) echo "usage: mount-folders start|reload|stop"; exit 1 ;;
+  *) echo "usage: mount-folders start|reload|stop|plan"; exit 1 ;;
 esac
