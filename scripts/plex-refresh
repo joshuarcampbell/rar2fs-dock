@@ -22,9 +22,21 @@ dir=$(mktemp -d)
 export LC_ALL=C     # comm needs byte-order sorting
 log() { echo "plex-refresh: $*"; }
 
+# Folders added through config/folders.conf live outside /sources (see mount-folders).
+# Looked up at every poll, so one added while this runs is watched from then on.
+STATE=/tmp/folders.state      # name<TAB>member:member...
+extra_roots() { cut -f2 "$STATE" 2>/dev/null | tr ':' '\n' | grep -v '^/sources/' | grep . | sort -u; }
+
 snapshot() {
-  find /sources -mindepth 1 -maxdepth "$DEPTH" \
-    \( -name '@Recycle' -o -name '.qsyncclient' \) -prune -o -type d -printf '%T@\t%p\n' 2>/dev/null | sort
+  {
+    find /sources -mindepth 1 -maxdepth "$DEPTH" \
+      \( -name '@Recycle' -o -name '.qsyncclient' \) -prune -o -type d -printf '%T@\t%p\n' 2>/dev/null
+    # such a folder is already the <name> level, so it gets one level less
+    extra_roots | while IFS= read -r root; do
+      [ "$DEPTH" -gt 1 ] && find "$root" -mindepth 1 -maxdepth "$((DEPTH - 1))" \
+        \( -name '@Recycle' -o -name '.qsyncclient' \) -prune -o -type d -printf '%T@\t%p\n' 2>/dev/null
+    done
+  } | sort
 }
 
 plex() {  # path-and-query, extra curl args...
@@ -34,8 +46,17 @@ plex() {  # path-and-query, extra curl args...
 }
 
 # /sources/tv@e/Show -> tv/Show -> /mnt/media/tv/Show or Y:\tv\Show (via PLEX_PATH_MAP)
+# /drives/e/Concerts/Live -> concerts/Live -> ...   (a folder from config/folders.conf)
 plex_path() {
-  rel=${1#/sources/}; top=${rel%%/*}; rel="${top%%@*}${rel#"$top"}"
+  case "$1" in
+    /sources/*) rel=${1#/sources/}; top=${rel%%/*}; rel="${top%%@*}${rel#"$top"}" ;;
+    *)  # the longest folder in folders.state that contains the path gives the name
+        rel=$(awk -F '\t' -v p="$1" '
+          { n = split($2, m, ":")
+            for (i = 1; i <= n; i++) if ((p == m[i] || index(p, m[i] "/") == 1) && length(m[i]) > best) { best = length(m[i]); name = $1 } }
+          END { if (best) printf "%s%s", name, substr(p, best + 1) }' "$STATE" 2>/dev/null)
+        [ -n "$rel" ] || return 0 ;;
+  esac
   best=""; target=""
   old_ifs=$IFS; IFS=';'
   for pair in $PLEX_PATH_MAP; do
@@ -83,10 +104,20 @@ scan() {  # source path
   fi
 }
 
-log "watching /sources every ${POLL}s (depth $DEPTH), Plex at $PLEX_URL"
+log "watching the source folders every ${POLL}s (depth $DEPTH), Plex at $PLEX_URL"
+extra_roots > "$dir/roots"
 snapshot > "$dir/prev"
 : > "$dir/pending"
 while sleep "$POLL"; do
+  # A folder was added or removed through folders.conf: start again from what is there
+  # now, or everything inside a new folder would look like a change and be scanned.
+  extra_roots > "$dir/roots.cur"
+  if ! cmp -s "$dir/roots" "$dir/roots.cur"; then
+    mv "$dir/roots.cur" "$dir/roots"
+    snapshot > "$dir/prev"
+    log "the folder list changed - now also watching: $(tr '\n' ' ' < "$dir/roots")"
+    continue
+  fi
   snapshot > "$dir/cur"
   # new or modified folders, plus the parents of removed ones
   {

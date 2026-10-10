@@ -6,31 +6,58 @@
 #   - folders whose archives rar2fs could not open (broken, incomplete or password-protected)
 #
 # Usage: health-report [folder]     e.g. health-report tv/tv-1   (default: everything)
+#
+# It covers every folder the container shares: the ones Docker mounted under /sources
+# and the ones added later through config/folders.conf (see mount-folders).
 # It only reads; nothing is changed.
 
+STATE=/tmp/folders.state      # name<TAB>member:member..., written by mount-folders
+TAB=$(printf '\t')
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+
+# one line per source folder: <real path><TAB><name on the drive>
+: > "$tmp/members"
+while IFS="$TAB" read -r name members; do
+  printf '%s\n' "$members" | tr ':' '\n' | while IFS= read -r member; do
+    [ -n "$member" ] && printf '%s\t%s\n' "$member" "$name" >> "$tmp/members"
+  done
+done 2>/dev/null < "$STATE"
+
 arg=${1%/}
+set --
 if [ -z "$arg" ]; then
-  set -- /sources/*/
+  while IFS="$TAB" read -r member name; do
+    [ -d "$member" ] && set -- "$@" "$member"
+  done < "$tmp/members"
+  [ $# -gt 0 ] || { echo "No folders are shared."; exit 1; }
 else
   first=${arg%%/*}; rest=${arg#"$first"}
-  set --
-  for r in "/sources/$first" /sources/"$first"@*; do
-    [ -d "$r$rest" ] && set -- "$@" "$r$rest"
-  done
+  while IFS="$TAB" read -r member name; do
+    [ "$name" = "$first" ] && [ -d "$member$rest" ] && set -- "$@" "$member$rest"
+  done < "$tmp/members"
   [ $# -gt 0 ] || { echo "No such folder: $arg"; exit 1; }
 fi
 
-# /sources/tv@e/Show -> /view/tv/Show
+# The same folder as the drive shows it:
+#   /sources/tv@e/Show -> /view/tv/Show        /drives/e/Concerts/Live -> /view/concerts/Live
+# (the longest source folder that contains the path decides)
 view_of() {
-  rel=${1#/sources/}; top=${rel%%/*}; tail=${rel#"$top"}
-  printf '/view/%s%s' "${top%%@*}" "$tail"
+  awk -F '\t' -v p="$1" '
+    p == $1 || index(p, $1 "/") == 1 { if (length($1) > best) { best = length($1); name = $2 } }
+    END { if (best) printf "/view/%s%s", name, substr(p, best + 1) }' "$tmp/members"
 }
-show() { printf '  %s\n' "${1#/sources/}"; }
+# how a path is printed: without /sources/, or by its name on the drive
+shown() {
+  case "$1" in
+    /sources/*) printf '%s' "${1#/sources/}" ;;
+    *) v=$(view_of "$1"); printf '%s' "${v:+${v#/view/}}"; [ -n "$v" ] || printf '%s' "$1" ;;
+  esac
+}
+show() { printf '  %s\n' "$(shown "$1")"; }
 
 skip='-name @Recycle -o -name .qsyncclient -o -name #recycle -o -name $RECYCLE.BIN'
-tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 
-echo "Scanning: $(for r in "$@"; do printf '%s ' "${r#/sources/}"; done)"
+echo "Scanning: $(for r in "$@"; do printf '%s ' "$(shown "$r")"; done)"
 find "$@" \( $skip \) -prune -o -type d -empty -print 2>/dev/null | sort > "$tmp/empty"
 find "$@" \( $skip \) -prune -o -type f \( -iname '*.rar' -o -iname '*.r[0-9][0-9]' \) -print 2>/dev/null | sort > "$tmp/rars"
 

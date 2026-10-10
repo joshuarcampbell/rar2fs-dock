@@ -886,11 +886,10 @@ Folders added like this are listed in `config\folders.conf`, one per line
 (`concerts = /drives/e/Concerts`). You can edit that file by hand and then run
 `docker exec rar2fs mount-folders reload`.
 
-Two features don't reach folders added this way yet: the
-[health report](#health-report) and
-[instant Plex refresh](#telling-plex-about-new-files-straight-away) only look at the
-folders listed in `docker-compose.override.yml`. Everything else - the drive, search,
-duplicates, sizes, the setup check - treats them like any other folder.
+A folder added this way is treated like any other: it's in the search, duplicates and
+sizes, the [health report](#health-report) and the setup check cover it, and
+[instant Plex refresh](#telling-plex-about-new-files-straight-away) watches it - give
+it an entry in `PLEX_PATH_MAP` like the rest (`concerts=/mnt/media/concerts`).
 
 ### Tray icon
 
