@@ -1,5 +1,10 @@
 # Registers a scheduled task that mounts the drive in the background each time you log in.
 # Run once from a normal (non-admin) PowerShell. Re-run to change settings.
+#
+# The login normally comes from ..\.env, read each time the drive is mounted. -User and
+# -Pass override that, but are stored in the task's settings in plain text - prefer a
+# .env file next to the "windows" folder (on another PC: two lines, WEBDAV_USER and
+# WEBDAV_PASS).
 param(
     [string]$Drive = "Y:",
     [string]$Url = "",   # default: chosen by mount.ps1 from ..\.env

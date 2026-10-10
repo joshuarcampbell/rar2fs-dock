@@ -245,7 +245,10 @@ class Handler(BaseHTTPRequestHandler):
         origin = self.headers.get('Origin') or self.headers.get('Referer') or ''
         if urllib.parse.urlparse(origin).netloc != self.headers.get('Host', ''):
             return self._send(403, b'This action can only be started from the status page.\n')
-        length = min(int(self.headers.get('Content-Length') or 0), 4096)
+        try:
+            length = max(0, min(int(self.headers.get('Content-Length') or 0), 4096))
+        except ValueError:
+            return self._send(400, b'Bad request.\n')
         form = urllib.parse.parse_qs(self.rfile.read(length).decode('utf-8', 'replace'))
         if action == '/run-scan':
             return self._start_scan()

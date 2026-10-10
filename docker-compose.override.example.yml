@@ -24,8 +24,13 @@ services:
 
 # Network shares. Docker can't see drive letters that Windows has mapped to a NAS, so a
 # share is connected by its network address. One entry per NAS folder; point "device"
-# straight at the folder. The login comes from NAS_USER / NAS_PASS in .env. After
-# changing a "device", run "docker compose down" and then "docker compose up -d".
+# straight at the folder. The login comes from NAS_USER / NAS_PASS in .env.
+# Docker keeps using a share's old "device" or login after you change it, until its
+# volume is removed (nas-media is the name below; the prefix is this folder's name):
+#   docker compose down
+#   docker volume rm rar2fs-dock_nas-media
+#   docker compose up -d
+# windows\doctor.ps1 spots this and prints the exact commands.
 #x-nas-options: &nas-options
 #  type: cifs
 #  o: "username=${NAS_USER:?set NAS_USER in .env},password=${NAS_PASS:?set NAS_PASS in .env},vers=3.0,iocharset=utf8,ro,uid=1000,gid=1000"

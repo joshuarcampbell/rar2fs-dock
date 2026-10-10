@@ -231,7 +231,8 @@ if (Get-NetFirewallRule -DisplayName "rar2fs-dock" -ErrorAction SilentlyContinue
 elseif ($DryRun) { Note "Would add a rule allowing ports 8765-8767 on private networks." }
 else {
     Note "Adding a rule for ports 8765-8767. Windows will ask for permission."
-    $rule = 'New-NetFirewallRule -DisplayName "rar2fs-dock" -Direction Inbound -Protocol TCP -LocalPort 8765-8767 -Action Allow -Profile Private | Out-Null'
+    # single quotes inside: the command passes through two layers of argument parsing
+    $rule = "New-NetFirewallRule -DisplayName 'rar2fs-dock' -Direction Inbound -Protocol TCP -LocalPort 8765-8767 -Action Allow -Profile Private | Out-Null"
     try { Start-Process powershell.exe -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList "-NoProfile", "-Command", $rule } catch { }
     if (Get-NetFirewallRule -DisplayName "rar2fs-dock" -ErrorAction SilentlyContinue) { Note "Added." }
     else { Note "The rule was NOT added. In an administrator PowerShell, run:"; Note "  $rule" }

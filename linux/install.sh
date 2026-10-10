@@ -1,14 +1,14 @@
 #!/bin/sh
 # Sets up rar2fs-dock mounts on a Linux machine (e.g. a Plex server).
 #
-#   sudo ./install.sh
+#   sudo sh install.sh
 #
 # It asks for the server's address and login, shows the folders the server has, and
 # lets you choose where each one is mounted. Run it again any time to add more.
 # It never edits /etc/fstab and never mounts over a folder that is in use.
 #
 # Without prompts (for scripts):
-#   sudo ./install.sh --url https://192.168.1.10:8765 --user rar2fs --pass 'secret' \
+#   sudo sh install.sh --url https://192.168.1.10:8765 --user rar2fs --pass 'secret' \
 #        --add tv=/mnt/media/tv --add films=/mnt/media/films
 set -e
 
@@ -94,7 +94,7 @@ fi
 server() { ( set -a; . "$CONF_DIR/common.conf"; set +a; rclone "$@" ); }
 
 say "Connecting to the server..."
-err=$(mktemp)
+err=$(mktemp); trap 'rm -f "$err"' EXIT
 folders=$(server lsf --dirs-only --contimeout 10s --timeout 30s --retries 1 :webdav: 2>"$err") \
   || fail "could not connect: $(tail -1 "$err")
 Check the address, the login, and that port 8765 is allowed through the server's firewall."

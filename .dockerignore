@@ -1,0 +1,6 @@
+# The image only needs the Dockerfile, entrypoint.sh and scripts/. Everything else is
+# kept out of the build, so passwords (.env), the certificate's private key (tls/) and
+# logins (config/) are never even sent to Docker's builder.
+*
+!entrypoint.sh
+!scripts/

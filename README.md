@@ -54,6 +54,9 @@ It does the rest:
    folders).
 5. Builds and starts the container. The first build takes several minutes.
 6. Mounts the drive and makes it come back at every login.
+7. Offers to add the [tray icon](#tray-icon).
+8. Asks whether Plex runs on another Windows PC, and if so sets that PC up too (see
+   [Plex on another Windows PC](#plex-on-another-windows-pc)).
 
 It's safe to run again: it never overwrites an existing `.env`, and keeps your folder
 list unless you add `-Force`. Everything can also be given up front, with no
@@ -132,9 +135,22 @@ to a NAS, so a share is connected by its network address instead. In
          - nas-tv:/sources/tv/tv-3:ro          # -> Y:\tv\tv-3
    ```
 
-The login comes from `NAS_USER` / `NAS_PASS` in `.env`. After changing a share's
-`device`, run `docker compose down` then `docker compose up -d` - Docker keeps a
-volume's old settings until it's recreated.
+The login comes from `NAS_USER` / `NAS_PASS` in `.env`.
+
+**After changing a share's `device` or the NAS login,** Docker keeps using the old one
+until that share's volume is removed - restarting isn't enough. For the `nas-tv` entry
+above:
+
+```powershell
+docker compose down
+docker volume rm rar2fs-dock_nas-tv
+docker compose up -d
+```
+
+The first part of the volume's name is this folder's name; `docker volume ls` lists
+them. `.\windows\doctor.ps1` notices a share in this state and prints the exact
+commands. Don't use `docker compose down -v` for this: it also deletes the container's
+saved history (events, health report, library index).
 
 ### 2. Set a password
 
@@ -255,9 +271,10 @@ network side is done. If it doesn't, see
 ### Connecting another Windows PC
 
 If that PC runs Plex, `.\windows\connect-plex.ps1` on the server PC does these steps
-for you - see [Plex on another Windows PC](#plex-on-another-windows-pc). By hand:
+for you - see [Plex on another Windows PC](#plex-on-another-windows-pc).
 
-On the other PC. It doesn't need Docker or a copy of your archives.
+To do it by hand, work on the other PC. It doesn't need Docker or a copy of your
+archives.
 
 **1. Install WinFsp and rclone,** then open a **new** PowerShell window:
 
@@ -312,9 +329,9 @@ Things to know:
   letter waits and appears by itself once the server answers again.
 - **If the certificate on the server PC is ever recreated** (after changing
   `TLS_HOSTS`, for example), copy the new `tls\cert.pem` over again.
-- **The tray icon, `doctor.ps1`, `update.ps1` and the backup scripts are for the
-  server PC only.** On the other PC you only need `mount.ps1`, `install-autostart.ps1`
-  and `uninstall-autostart.ps1`.
+- **Every other script is for the server PC only** - the tray icon, `doctor.ps1`,
+  `update.ps1`, `add-folder.ps1`, the backup scripts and the rest. On the other PC you
+  only need `mount.ps1`, `install-autostart.ps1` and `uninstall-autostart.ps1`.
 - **If PowerShell refuses to run the scripts,** run this first:
   `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
 
@@ -425,8 +442,9 @@ network. Windows often refuses that on home PCs, so it then offers three ways on
 
 Options: `-PlexHost 192.168.1.20` skips the question, `-Drive P:` uses another letter
 on the Plex PC, `-CopyTo \\192.168.1.20\Shared` names the shared folder up front,
-`-NoPlex` sets up the drive only, and `-DryRun` shows what it would do without changing
-anything. Running it again is safe; it makes a new password for the `plex` login and a
+`-Token <token>` supplies a Plex token, `-Login <name>` names the login it makes,
+`-NoPlex` sets up the drive only, `-NoCopy` leaves the folder on this PC, and `-DryRun`
+shows what it would do without changing anything. Running it again is safe; it makes a new password for the `plex` login and a
 fresh folder each time.
 
 The "things to know" under [Plex on the same Windows PC](#plex-on-the-same-windows-pc)
@@ -677,6 +695,7 @@ Windows, so set the PC to log in automatically, or keep it logged in.
 | Find something, see what's new, spot duplicates | The [status page](#the-library-search-recently-added-duplicates-sizes) |
 | Add a folder without a restart | `.\windows\add-folder.ps1 -Path E:\Concerts` - see [Adding folders without a restart](#adding-folders-without-a-restart) |
 | Update to a newer version | `.\windows\update.ps1` - see [Updating](#updating) |
+| Connect Plex on another Windows PC | `.\windows\connect-plex.ps1` - see [Plex on another Windows PC](#plex-on-another-windows-pc) |
 | Find out why something isn't working | `.\windows\doctor.ps1` - see [Setup check](#setup-check) |
 | Save your setup, or move it to another PC | `.\windows\backup.ps1` - see [Backup and restore](#backup-and-restore) |
 | See at a glance whether it's healthy | The [tray icon](#tray-icon) |
@@ -702,9 +721,10 @@ enable Docker Desktop → Settings → General → *Start Docker Desktop when yo
 <https://localhost:8766/status.html> (or `https://<this-PC's-IP>:8766/status.html` from
 another device), with the same login as the drive. Your browser will warn about the
 self-signed certificate the first time; accept it once. It shows each folder, where it
-comes from and whether it's mounted or has stopped, the unrar/rar2fs versions and
-whether newer ones exist, the last health report, recent events (restarts, Plex scans,
-alerts) and the current settings.
+comes from and whether it's mounted or has stopped, the result of the
+[setup check](#setup-check), [what's on the drive](#the-library-search-recently-added-duplicates-sizes),
+the unrar/rar2fs versions and whether newer ones exist, the last health report, recent
+events (restarts, Plex scans, alerts) and the current settings.
 
 The page is live: while you have it open it updates itself every few seconds, without
 reloading, so a folder that stops or a report that finishes shows up straight away. A
@@ -866,6 +886,12 @@ Folders added like this are listed in `config\folders.conf`, one per line
 (`concerts = /drives/e/Concerts`). You can edit that file by hand and then run
 `docker exec rar2fs mount-folders reload`.
 
+Two features don't reach folders added this way yet: the
+[health report](#health-report) and
+[instant Plex refresh](#telling-plex-about-new-files-straight-away) only look at the
+folders listed in `docker-compose.override.yml`. Everything else - the drive, search,
+duplicates, sizes, the setup check - treats them like any other folder.
+
 ### Tray icon
 
 A coloured dot next to the clock shows the state at a glance: green for healthy, red
@@ -878,7 +904,8 @@ Desktop not running, usually). A notification pops up when the state changes.
 ```
 
 Right-click it for: the current state, *Open status page*, *Open drive*, *Remount
-drive* and *Restart container*. Double-click opens the status page. The setup wizard
+drive* and *Restart container*. Double-click opens the status page. The menu follows
+Windows' light or dark app mode. The setup wizard
 offers to install it. Windows may tuck new icons behind the **^** arrow; drag it out
 next to the clock to keep it in view.
 
@@ -1019,9 +1046,10 @@ sensor:
 
 Fields in `status.json`: `health` (`healthy`, `unhealthy` or `starting`), `healthy`
 (true/false), `detail` (which check failed), `folders_total`, `folders_mounted`,
-`updates_available`, `report_problems`, `restarts_last_hour`, `library_items`,
-`library_bytes`, `duplicates`, and the full lists under
-`folders`, `versions`, `report`, `settings` and `events`.
+`updates_available`, `setup_problems`, `report_problems`, `restarts_last_hour`,
+`library_items`, `library_bytes`, `duplicates`, `started` and `generated` (times, in
+seconds since 1970), and the full lists under `folders`, `setup_check`, `versions`,
+`report`, `settings` and `events`.
 
 ### Updates for unrar and rar2fs
 
@@ -1116,8 +1144,10 @@ Put that in `.env`, then run `docker compose up -d`.
   `.\windows\install-autostart.ps1` to switch the drive over. Add `-Original` to keep the
   full names on this PC.
 - **Other Windows PCs:** use port 8767 in the address, e.g.
-  `.\windows\mount.ps1 -Url https://<this-PC's-IP>:8767 -User <user> -Pass <password>`.
-  It uses the same certificate, login and guess-throttling as the normal drive.
+  `.\windows\mount.ps1 -Url https://<this-PC's-IP>:8767` (see
+  [Connecting another Windows PC](#connecting-another-windows-pc)). It uses the same
+  certificate, login and guess-throttling as the normal drive. `connect-plex.ps1`
+  picks this port by itself when `SHORT_PATHS=1`.
 
 The limit is `MAX_PATH` in `docker-compose.yml`: 230 characters, counted from the
 drive's root, which leaves room for the drive letter or a network name in front.
@@ -1329,17 +1359,32 @@ the mistakes below by itself and says how to fix them.
   [Keeping it to this PC only](#keeping-it-to-this-pc-only).
 - **The status page uses the same logins** as the drive, on port 8766. It shows your
   folder names and source paths, so it's password-protected too. Wrong passwords are
-  slowed to about two guesses a second, its one action (starting a health report) is
-  only accepted from the page itself, and it can't be embedded in another site.
+  slowed to about two guesses a second, its two actions (starting a health report or
+  a size scan) are only accepted from the page itself, and it can't be embedded in
+  another site.
 - **The status token is read-only.** If you set `STATUS_TOKEN`, it can fetch
-  `status.json` and `/metrics` and nothing else: not the page, not the report, and
-  it can't start anything. It travels in the address, so treat it like a password and
+  `status.json`, `/metrics` and the RSS feed and nothing else: not the page, not the
+  report, and it can't start anything. It travels in the address, so treat it like a password and
   keep HTTPS on.
 - **Password guessing is slowed down** on the drive as well. A login that has worked
   is remembered and always let through. After more than five wrong logins in ten
   seconds, logins that haven't worked before are refused for a while, so devices
   already connected never notice and nobody can be locked out. Still use a long,
   random password: `change-me` in `.env.example` is only a placeholder.
+- **Where the secrets are.** `.env` holds the drive's password in plain text, plus the
+  NAS login and the Plex token if you use them. Extra logins in
+  `config\users.htpasswd` are stored only as hashes, and `tls\key.pem` is the
+  certificate's private key. All three are gitignored and are left out of the image
+  when it is built (`.dockerignore`), but anyone who can read this folder can read
+  them - as can anyone who gets hold of a [backup](#backup-and-restore) zip.
+- **A Plex token is powerful.** The one `connect-plex.ps1` fetches (or you paste) is
+  your Plex account's token, not a limited one. It is only sent to your own Plex
+  server, over your local network, to ask for scans. Plex's address in `PLEX_URL` is
+  plain `http://`, so use it on a network you trust.
+- **The folder made for another PC** by `connect-plex.ps1` contains a login (its own,
+  separate from yours) in a small `.env`. `Setup.cmd` restricts that file to the user
+  who runs it. To cut that PC off, delete the `plex:` line from
+  `config\users.htpasswd` and run `docker compose restart`.
 - **AppArmor (Linux hosts).** Docker's default AppArmor profile blocks the FUSE mounts
   this container needs, so it runs with AppArmor "unconfined". If you run it on a
   Linux host that uses AppArmor, you can load the narrower profile in

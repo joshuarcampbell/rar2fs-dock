@@ -227,8 +227,9 @@ if ($writeOverride) {
     if ($nasBlocks) {
         $file += @(
             "",
-            "# Network shares. The login comes from NAS_USER / NAS_PASS in .env. After changing a",
-            "# `"device`", run: docker compose down   and then   docker compose up -d",
+            "# Network shares. The login comes from NAS_USER / NAS_PASS in .env. Docker keeps",
+            "# using a share's old `"device`" or login after you change it, until its volume is",
+            "# removed: run .\windows\doctor.ps1, which spots that and prints the commands.",
             "x-nas-options: &nas-options",
             "  type: cifs",
             '  o: "username=${NAS_USER:?set NAS_USER in .env},password=${NAS_PASS:?set NAS_PASS in .env},vers=3.0,iocharset=utf8,ro,uid=1000,gid=1000"',

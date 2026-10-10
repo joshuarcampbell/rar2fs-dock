@@ -37,7 +37,7 @@ except ImportError:
 
 RESERVE = 60        # room kept below every folder, whatever is inside it
 MIN_NAME = 12       # never shorten a name below this
-ROOMY = 160        # a folder with this much room left is not inspected further
+ROOMY = 160         # a folder with this much room left is not inspected further
 SUBFOLDER = 20      # room assumed for a subfolder's own (possibly shortened) name
 READABLE = 30       # a folder is not cut below this just for files deeper down
 TTL = 15            # seconds a folder's name table is remembered

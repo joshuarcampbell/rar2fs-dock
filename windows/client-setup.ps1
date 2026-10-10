@@ -33,6 +33,9 @@ if (-not (Test-Path (Join-Path $root ".env"))) { Stop-Setup "There is no .env fi
 if ($Url -like "https://*" -and -not (Test-Path (Join-Path $root "tls\cert.pem"))) {
     Stop-Setup "There is no tls\cert.pem in $root. Copy the whole folder from the server PC again."
 }
+# .env holds a password: let only this user, administrators and Windows itself read it.
+# (The well-known SIDs are used because the group names differ between languages.)
+& icacls.exe (Join-Path $root ".env") /inheritance:r /grant:r "${env:USERNAME}:(F)" "*S-1-5-32-544:(F)" "*S-1-5-18:(F)" 2>&1 | Out-Null
 Note "The login and the certificate are here."
 
 Step "Checking what's needed"
