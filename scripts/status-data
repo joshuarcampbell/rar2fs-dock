@@ -19,7 +19,7 @@ health=$(cut -f1 /state/health 2>/dev/null); detail=$(cut -s -f2- /state/health 
 # ---- folders ----
 : > "$tmp/folders"
 for name in $(sed -n 's|^/view/||p' /tmp/mounts.expected 2>/dev/null); do
-  if ls "/view/$name" > /dev/null 2>&1; then mounted=true; items=$(ls -1A "/view/$name" 2>/dev/null | wc -l); else mounted=false; items=0; fi
+  if mount-alive "/view/$name"; then mounted=true; items=$(ls -1A "/view/$name" 2>/dev/null | wc -l); else mounted=false; items=0; fi
   jq -n --arg name "$name" --argjson mounted "$mounted" --argjson items "$items" \
     '{name: $name, mounted: $mounted, items: $items}' >> "$tmp/folders"
 done

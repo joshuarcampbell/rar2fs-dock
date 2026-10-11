@@ -8,7 +8,7 @@
 EXPECTED=/tmp/mounts.expected
 [ -s "$EXPECTED" ] || { echo "no mounts were set up"; exit 1; }
 while IFS= read -r m; do
-  ls "$m" > /dev/null 2>&1 || { echo "$m has stopped responding"; exit 1; }
+  mount-alive "$m" || { echo "$m has stopped responding"; exit 1; }
 done < "$EXPECTED"
 if [ "${TLS:-1}" = "1" ]; then scheme=https; else scheme=http; fi
 code=$(curl -sk -o /dev/null -m 5 -w '%{http_code}' "$scheme://127.0.0.1:8080/")

@@ -15,7 +15,8 @@ origin() {
       for (i = 1; i <= NF; i++) if ($i == "-") { src = $(i + 2); break }
       root = $4
       if (src ~ /^[A-Za-z]:/) { gsub(/\//, "\\", root); p = substr(src, 1, 2) root }
-      else                    { p = src (root == "/" ? "" : root) }
+      else if (src ~ /^\/\// || src ~ /:/) { p = src (root == "/" ? "" : root) }   # a share: //nas/share, host:/export
+      else                    { p = root }      # a folder on a Linux host: its path (the name of the disk says nothing)
       print p; exit }' /proc/self/mountinfo |
     sed 's/[\]040/ /g; s/[\]134/\\/g; s/[\][\]*/\\/g'   # mountinfo writes space as \040, backslash as \134
 }
@@ -46,7 +47,7 @@ HTML
 folders=$(sed -n 's|^/view/||p' /tmp/mounts.expected 2>/dev/null)
 for name in $folders; do
   d="/view/$name"
-  if ls "$d" > /dev/null 2>&1; then st='<span class="badge ok">mounted</span>'; n=$(ls -1A "$d" 2>/dev/null | wc -l); else st='<span class="badge bad">stopped</span>'; n='-'; fi
+  if ls "$d" > /dev/null 2>&1; then st='<span class="badge ok">mounted</span>'; n=$(ls -1A "$d" 2>/dev/null | wc -l); elif mount-alive "$d"; then st='<span class="badge wait">no access</span>'; n='-'; else st='<span class="badge bad">stopped</span>'; n='-'; fi
   from=$(awk -v a="/sources/$name" '$5 == a || index($5, a "/") == 1 || index($5, a "@") == 1 {print $5}' /proc/self/mountinfo | sort -u |
     while IFS= read -r m; do
       rel=${m#/sources/$name}; rel=${rel#@*}

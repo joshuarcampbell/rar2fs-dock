@@ -6,7 +6,8 @@ unpacking, no extra disk space.
 [rar2fs](https://github.com/hasse69/rar2fs) runs inside a Docker container and reads
 your local folders and network shares. The extracted view is served to Windows and
 mounted as a normal drive letter (e.g. `Y:`). Other machines on your network - a Linux
-Plex server, for instance - can mount the same view.
+Plex server, for instance - can mount the same view. The container can also run on a
+Linux machine instead of a Windows PC: see [Running it on Linux](#running-it-on-linux).
 
 ```
  D:\Downloads ─┐                    ┌──────── Docker ────────┐
@@ -18,6 +19,7 @@ Plex server, for instance - can mount the same view.
 [Other machines](#using-it-from-other-machines) ·
 [Plex on this PC](#plex-on-the-same-windows-pc) ·
 [Plex on another Windows PC](#plex-on-another-windows-pc) · [Plex on Linux](#plex-on-linux) ·
+[Running it on Linux](#running-it-on-linux) ·
 [Everyday use](#everyday-use) · [Extras](#extras) · [Settings](#settings) ·
 [Slow during scans](#if-the-pc-slows-down-during-scans) ·
 [This PC only](#keeping-it-to-this-pc-only) · [Troubleshooting](#troubleshooting) ·
@@ -692,6 +694,83 @@ mount. Each line is `ok`, `CHECK` or `PROBLEM`, with the command that fixes it.
 | Plex can't see the files | Make sure the service file still has `--allow-other`. Without it, only root can read the mount. |
 | Old folder layout still showing | Cached listing - `sudo systemctl restart rar2fs@<name>`. |
 | Items marked *unavailable* in Plex | The Windows PC was off during a scan. Once it's back, scan again and they return - as long as trash emptying is off. |
+
+## Running it on Linux
+
+Everything above runs the container on a Windows PC. It runs on Linux just as well -
+useful when the archives are on a Linux server or a NAS, and often the media server is
+on that same machine. One script sets it all up. Clone the repo on the Linux machine,
+then from its folder:
+
+```bash
+sudo sh linux/setup.sh
+```
+
+1. Checks Docker, the Docker Compose plugin and FUSE, and tells you what to install if
+   one is missing. (Docker Engine: <https://docs.docker.com/engine/install/>.)
+2. Asks which folders hold your media and what each should be called. A NAS share
+   that is mounted on the machine is just another folder. Folders given the same name
+   are merged, or kept side by side as subfolders - it asks.
+3. Writes `.env` with a random password, and `docker-compose.override.yml` with your
+   folders.
+4. Builds and starts the container and waits until it is healthy.
+5. If a firewall (ufw or firewalld) is on and other devices will connect, offers to
+   open ports 8765-8767.
+6. Offers to mount the unpacked folders on the same machine, under `/mnt/rar2fs` unless
+   you choose elsewhere - so a media server running there reads them as ordinary
+   folders. This uses the [installer](#quick-way-the-installer) described above,
+   pointed at the machine itself.
+
+It's safe to run again: it keeps an existing `.env`, and your folder list unless you
+add `--force`. Without questions:
+
+```bash
+sudo sh linux/setup.sh --yes --folder /srv/media/films=films --folder /srv/media/tv=tv \
+     --network --mount-at /mnt/rar2fs
+```
+
+`--network` lets other devices connect (the default is this machine only),
+`--short-paths` adds the [short-names view](#short-names-for-windows) for Windows PCs
+that will connect, `--subfolders` keeps same-named folders side by side, `--no-mount`
+skips step 6, and `--no-start` only writes the files.
+
+**What's different on Linux:**
+
+- **The container's user must be able to read your folders.** Everything inside runs
+  as user id 1000, and on Linux the folders keep their real permissions. If a folder
+  isn't readable by that user it appears on the drive but can't be opened; the status
+  page marks it *no access* and the setup check says which one. Fix it with
+  `sudo chmod -R o+rX <folder>`, or for that user only:
+  `sudo setfacl -R -m u:1000:rX <folder>`.
+- **No drive letter, no tray icon.** Those are for Windows. On the machine itself use
+  the mounted folders from step 6; other machines connect exactly as described under
+  [Using it from other machines](#using-it-from-other-machines) - including Windows
+  PCs, with the scripts in `windows\`.
+- **A media server on the same machine** is reached from the container as
+  `http://host.docker.internal:<port>` - for example
+  `PLEX_URL=http://host.docker.internal:32400` or
+  `JELLYFIN_URL=http://host.docker.internal:8096` - and its path map uses the mounted
+  folders (`films=/mnt/rar2fs/films`). See
+  [Telling your media server about new files](#telling-your-media-server-about-new-files).
+- **SELinux** (Fedora, RHEL and relatives): if the container can't read your folders
+  although the permissions are right, add `,z` to the end of their lines in
+  `docker-compose.override.yml` (`:ro,z`) and run `sudo docker compose up -d`.
+
+The Windows helper scripts have plain equivalents:
+
+| To... | On Linux |
+|---|---|
+| Check the setup | `sudo docker exec rar2fs doctor --full`, and `sudo sh linux/doctor.sh` for the mounts |
+| Update | `git pull && sudo docker compose up -d --build` |
+| See whether anyone is watching | *In use now* on the status page |
+| Change the processor limit while it runs | `sudo docker update --cpus 4 rar2fs` (and `CPU_LIMIT=4` in `.env` to keep it) |
+| Add a login | `printf '%s' 'the-password' \| sudo docker exec -i rar2fs htpasswd -niB plex >> config/users.htpasswd`, then `sudo docker compose restart` |
+| Change the folders | edit `docker-compose.override.yml`, then `sudo docker compose up -d` |
+| Back up your setup | keep copies of `.env`, `docker-compose.override.yml`, `config/` and `tls/` |
+
+The setup script has been tested on Docker's own Linux machine, from a fresh copy
+through to a healthy container. Step 6 (mounting through systemd) and the firewall
+step were not part of that run.
 
 ## Everyday use
 

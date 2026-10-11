@@ -22,7 +22,8 @@ origin() {
       for (i = 1; i <= NF; i++) if ($i == "-") { src = $(i + 2); break }
       root = $4
       if (src ~ /^[A-Za-z]:/) { gsub(/\//, "\\", root); p = substr(src, 1, 2) root }
-      else                    { p = src (root == "/" ? "" : root) }
+      else if (src ~ /^\/\// || src ~ /:/) { p = src (root == "/" ? "" : root) }   # a share: //nas/share, host:/export
+      else                    { p = root }      # a folder on a Linux host: its path (the name of the disk says nothing)
       print p; exit }' /proc/self/mountinfo |
     sed 's/[\]040/ /g; s/[\]134/\\/g; s/[\][\]*/\\/g'
 }
@@ -46,7 +47,7 @@ while IFS="$TAB" read -r raw type; do
   if [ "$type" = conf ]; then from=$path; shown=$path; else from=$(origin "$raw"); shown=${path#/sources/}; fi
   if ! ls -A "$path" > /dev/null 2>&1; then
     wrong=$((wrong + 1))
-    say bad "$shown can't be read" "The container is not allowed to look inside $from. For a network share, check that the NAS login (NAS_USER / NAS_PASS in .env) may read that folder."
+    say bad "$shown can't be read" "The container is not allowed to look inside $from. For a network share, check that the NAS login (NAS_USER / NAS_PASS in .env) may read that folder. On a Linux host, let the container's user (id $(id -u)) read the folder you listed for it in docker-compose.override.yml: sudo chmod -R o+rX <that folder>   or, for that user only: sudo setfacl -R -m u:$(id -u):rX <that folder>"
   elif [ -z "$(ls -A "$path" 2>/dev/null | head -1)" ]; then
     wrong=$((wrong + 1))
     case "$type" in
@@ -64,7 +65,7 @@ EOF
 if [ -s "$EXPECTED" ]; then
   stopped=""
   while IFS= read -r m; do
-    case "$m" in /view/*) ls "$m" > /dev/null 2>&1 || stopped="$stopped ${m#/view/}" ;; esac
+    case "$m" in /view/*) mount-alive "$m" || stopped="$stopped ${m#/view/}" ;; esac
   done < "$EXPECTED"
   if [ -n "$stopped" ]; then
     say bad "Stopped:$stopped" "These folders have stopped answering. The container restarts itself after three failed checks; to do it now: docker compose restart"

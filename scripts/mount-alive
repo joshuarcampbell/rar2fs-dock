@@ -1,0 +1,10 @@
+#!/bin/sh
+# Is the mount at <path> still answering?   mount-alive /view/films && echo yes
+#
+# Exit code 0 if it is, 1 if it has died. A folder the container's user simply isn't
+# allowed to read counts as alive: the mount works, the permissions on the source are
+# wrong - that is doctor's business ("can't be read"), and restarting would not help.
+# Used by healthcheck, status-page, status-data and doctor, so they all agree.
+err=$(LC_ALL=C ls "$1" 2>&1 > /dev/null) && exit 0
+case "$err" in *"Permission denied"*) exit 0 ;; esac
+exit 1

@@ -13,6 +13,10 @@ services:
     # APPARMOR_PROFILE=rar2fs-dock in .env instead (see README, "Security").
     # Docker Desktop on Windows and Mac doesn't use AppArmor, so there it changes nothing.
     security_opt: ["apparmor:${APPARMOR_PROFILE:-unconfined}"]
+    # Lets the container reach a media server on the machine it runs on, as
+    # http://host.docker.internal:<port>. Docker Desktop has that name built in; on a
+    # Linux host this line provides it.
+    extra_hosts: ["host.docker.internal:host-gateway"]
     # Optional ceilings, so a library scan can't take over the PC. CPU_LIMIT is a number
     # of processor cores (2, or 1.5); MEMORY_LIMIT is an amount such as 4g. 0 = no limit.
     # Set them in .env (see README, "If the PC slows down during scans").
