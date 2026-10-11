@@ -28,6 +28,8 @@
 #   --short-paths        add the short-names view, for Windows PCs that will connect
 #   --mount-at DIR       mount the unpacked folders under DIR on this machine
 #   --no-mount           don't mount them here
+#   --user UID:GID       run the container as this user and group, instead of the one
+#                        this script works out from who can read your folders
 #   --no-start           write the files only; don't start the container
 #   --force              replace an existing docker-compose.override.yml
 #   --yes                accept the defaults instead of asking
@@ -39,10 +41,10 @@ env_file="$repo/.env"
 override="$repo/docker-compose.override.yml"
 NAME=${RAR2FS_CONTAINER:-rar2fs}        # these two overrides are for testing
 PORT=${RAR2FS_PORT:-8765}
-CONTAINER_UID=1000                      # the user everything in the container runs as
+puid=""; pgid=""                        # the user the container runs as; worked out below
 
 folders=$(mktemp); trap 'rm -f "$folders"' EXIT
-yes=0; network=0; short=0; subfolders=0; force=0; start=1; mount=ask; mount_at=""
+yes=0; network=0; short=0; subfolders=0; force=0; start=1; mount=ask; mount_at=""; forced_user=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --folder)      printf '%s\n' "$2" >> "$folders"; shift 2 ;;
@@ -51,6 +53,7 @@ while [ $# -gt 0 ]; do
     --short-paths) short=1; shift ;;
     --mount-at)    mount=yes; mount_at=$2; shift 2 ;;
     --no-mount)    mount=no; shift ;;
+    --user)        forced_user=$2; shift 2 ;;
     --no-start)    start=0; shift ;;
     --force)       force=1; shift ;;
     --yes|-y)      yes=1; shift ;;
@@ -74,14 +77,60 @@ ask_yes() {  # question, default (y or n)
   case "${reply:-$2}" in y|Y|yes|Yes) return 0 ;; *) return 1 ;; esac
 }
 safe_name() { printf '%s' "$1" | tr 'A-Z' 'a-z' | sed 's/[^a-z0-9._-][^a-z0-9._-]*/-/g; s/^[-.]*//; s/[-.]*$//'; }
-# can the container's user read this folder?
-readable() {
-  if setpriv --reuid "$CONTAINER_UID" --regid "$CONTAINER_UID" --clear-groups true 2>/dev/null; then
-    setpriv --reuid "$CONTAINER_UID" --regid "$CONTAINER_UID" --clear-groups sh -c 'ls "$1" >/dev/null 2>&1' sh "$1"
-  else
-    return 0        # can't tell on this system; the setup check in the container will say
+# Which user should the container run as?
+#
+# On Linux your folders keep their real permissions, and the container never runs as
+# root. So rather than changing permissions on your media, the container is made to run
+# as a user who can already read it: you (whoever ran sudo), or the folders' owner.
+# The answer goes into .env as PUID / PGID.
+#
+#   choose_user <file of name<TAB>path>      sets $puid, $pgid and $unreadable
+can_test() { setpriv --reuid 65534 --regid 65534 --clear-groups true 2>/dev/null; }
+reads() { setpriv --reuid "$1" --regid "$2" --clear-groups sh -c 'ls "$1" >/dev/null 2>&1' sh "$3"; }   # uid, gid, folder
+choose_user() {
+  unreadable=""
+  if [ -n "$forced_user" ]; then
+    puid=${forced_user%%:*}; pgid=${forced_user#*:}; [ "$pgid" != "$forced_user" ] || pgid=$puid
+    case "$puid$pgid" in *[!0-9]*|'') stop "--user wants numbers, like 1000:1000 (see: id -u; id -g)" ;; esac
+    [ "$puid" != 0 ] || stop "The container can't run as root (user id 0)."
+    return 0
   fi
+  candidates=$(mktemp)
+  {
+    # you, with your own group and with each folder's group
+    if [ -n "${SUDO_UID:-}" ] && [ "$SUDO_UID" != 0 ]; then
+      echo "$SUDO_UID:${SUDO_GID:-$SUDO_UID}"
+      cut -f2 "$1" | while IFS= read -r p; do echo "$SUDO_UID:$(stat -c %g "$p")"; done
+    fi
+    # each folder's owner
+    cut -f2 "$1" | while IFS= read -r p; do stat -c '%u:%g' "$p"; done
+    echo "1000:1000"                      # the image's own default
+  } | grep -v '^0:' | grep -v ':0$' | awk '!seen[$0]++' > "$candidates"     # never root, nor root's group
+
+  if can_test; then
+    # the first who can read every folder; failing that, whoever can read the most
+    best=""; best_missing=999999
+    while IFS= read -r who; do
+      missing=0
+      while IFS= read -r p; do reads "${who%%:*}" "${who#*:}" "$p" < /dev/null || missing=$((missing + 1)); done <<EOF
+$(cut -f2 "$1")
+EOF
+      if [ "$missing" -lt "$best_missing" ]; then best=$who; best_missing=$missing; fi
+      [ "$missing" -eq 0 ] && break
+    done < "$candidates"
+    puid=${best%%:*}; pgid=${best#*:}
+    unreadable=$(cut -f2 "$1" | while IFS= read -r p; do reads "$puid" "$pgid" "$p" < /dev/null || printf '%s\n' "$p"; done)
+  else
+    # can't try it out on this system: if every folder has the same owner use that, else you
+    owners=$(cut -f2 "$1" | while IFS= read -r p; do stat -c '%u:%g' "$p"; done | sort -u | grep -v '^0:' | grep -v ':0$' || true)
+    if [ "$(printf '%s\n' "$owners" | grep -c .)" = 1 ]; then best=$owners; else best=$(head -1 "$candidates"); fi
+    puid=${best%%:*}; pgid=${best#*:}
+  fi
+  rm -f "$candidates"
 }
+user_name() { getent passwd "$1" 2>/dev/null | cut -d: -f1; }
+# a setting from .env (empty if it is not there)
+val() { [ -f "$env_file" ] || return 0; sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$env_file" | head -1; }
 owner=${SUDO_USER:-}          # files this writes are handed to the person who ran sudo
 
 [ "$(id -u)" = "0" ] || stop "Run this with sudo:  sudo sh linux/setup.sh"
@@ -144,12 +193,20 @@ if [ "$write_override" = 1 ]; then
     case "$path" in *:*|*'"'*) stop "'$path' contains a character (: or \") that Docker's folder list can't take." ;; esac
     name=$(safe_name "$name"); [ -n "$name" ] || name=media
     printf '%s\t%s\n' "$name" "$path" >> "$list"
-    if ! readable "$path"; then
-      note "NOTE: the container's user (id $CONTAINER_UID) can't read $path, so it will look empty."
-      note "      Let everyone read it:        sudo chmod -R o+rX '$path'"
-      note "      or only the container:       sudo setfacl -R -m u:$CONTAINER_UID:rX '$path'"
-    fi
   done < "$folders"
+
+  # who the container runs as, so that it can read them
+  choose_user "$list"
+  who=$(user_name "$puid")
+  note "The container will run as user id $puid${who:+ ($who)}, group $pgid - someone who can already"
+  note "read your folders, so nothing about their permissions has to change."
+  if [ -n "$unreadable" ]; then
+    note ""
+    note "NOTE: no single ordinary user can read all of your folders. User id $puid can't read:"
+    printf '%s\n' "$unreadable" | while IFS= read -r p; do note "        $p"; done
+    note "      Those will appear on the drive but can't be opened, until that user is let in:"
+    note "        sudo setfacl -R -m u:$puid:rX <folder>      (or: sudo chmod -R o+rX <folder>)"
+  fi
 
   # folders that share a name: one merged folder, or side by side?
   shared=$(cut -f1 "$list" | sort | uniq -d | tr '\n' ' ')
@@ -189,6 +246,14 @@ fi
 step "Settings"
 if [ -f "$env_file" ]; then
   note "Keeping your existing .env."
+  # ...except for who the container runs as, if the folder list was (re)written above
+  if [ -n "$puid" ] && { [ "$(val PUID)" != "$puid" ] || [ "$(val PGID)" != "$pgid" ]; }; then
+    kept=$(mktemp)
+    grep -v '^[[:space:]]*P[UG]ID[[:space:]]*=' "$env_file" | grep -v '^# The user the container runs as' > "$kept" || true
+    printf '\n# The user the container runs as: one who can read your folders (see README, "Running it on Linux")\nPUID=%s\nPGID=%s\n' "$puid" "$pgid" >> "$kept"
+    cat "$kept" > "$env_file"; rm -f "$kept"          # cat, so the file keeps its owner and mode
+    note "Set PUID=$puid and PGID=$pgid in it."
+  fi
 else
   [ "$network" = 1 ] || { ask_yes "Will other devices on your network connect to it (a media server on another machine, a Windows PC)?" n && network=1 || true; }
   [ "$short" = 1 ] || [ "$network" = 0 ] || { ask_yes "Will Windows PCs open the drive? (adds a view with over-long names shortened for them)" n && short=1 || true; }
@@ -200,6 +265,10 @@ else
     echo "# The login for the drive and the status page"
     echo "WEBDAV_USER=rar2fs"
     echo "WEBDAV_PASS=$password"
+    if [ -n "$puid" ]; then
+      echo; echo "# The user the container runs as: one who can read your folders (see README, \"Running it on Linux\")"
+      echo "PUID=$puid"; echo "PGID=$pgid"
+    fi
     if [ "$short" = 1 ]; then
       echo; echo "# Show shortened folder names where a path would be too long for Windows"; echo "SHORT_PATHS=1"
     fi
@@ -220,7 +289,8 @@ fi
 # The container's user keeps the HTTPS certificate in tls/ and reads extra logins from
 # config/, so it has to be able to write the one and read the other.
 mkdir -p "$repo/tls" "$repo/config"
-chown "$CONTAINER_UID:$CONTAINER_UID" "$repo/tls"
+run_uid=$(val PUID); run_gid=$(val PGID)
+chown -R "${run_uid:-1000}:${run_gid:-1000}" "$repo/tls"
 chmod a+rX "$repo/config"; chmod a+r "$repo/config"/* 2>/dev/null || true
 
 if [ "$start" = 0 ]; then
@@ -243,7 +313,6 @@ done
 note "The container is healthy."
 docker exec "$NAME" doctor 2>/dev/null | awk -F '\t' '$1 != "ok" { printf "   NOTE: %s - %s\n", $2, $3 }'
 
-val() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$env_file" | head -1; }
 user=$(val WEBDAV_USER); pass=$(val WEBDAV_PASS)
 if [ "$(val TLS)" = "0" ]; then scheme=http; else scheme=https; fi
 open_to_network=1; [ "$(val BIND)" = "127.0.0.1" ] && open_to_network=0

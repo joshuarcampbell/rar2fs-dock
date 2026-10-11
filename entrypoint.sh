@@ -13,6 +13,36 @@
 # The helpers live in scripts/ (installed to /usr/local/bin).
 set -e
 
+# ---- which user this is ----
+# Normally user 1000 ("rar2fs"). With PUID / PGID in .env it is whoever owns your media
+# on a Linux host - a user this image has never heard of, so give it a home it can
+# write to, and make sure it can use the two folders that outlive the container.
+[ -w "${HOME:-/}" ] || export HOME=/tmp
+# fusermount won't mount for a user id that has no name, so give this one a name
+if ! getent passwd "$(id -u)" > /dev/null 2>&1; then
+  echo "rar2fs-$(id -u):x:$(id -u):$(id -g):rar2fs-dock:/tmp:/usr/sbin/nologin" >> /etc/passwd \
+    || { echo "ERROR: user id $(id -u) has no name and one couldn't be added - rebuild the image: docker compose up -d --build"; exit 1; }
+fi
+if [ "$(id -u)" = "0" ]; then
+  echo "ERROR: refusing to run as root - it could make your read-only folders writable. Set PUID in .env to an ordinary user's id."
+  exit 1
+fi
+for dir in /state /tls; do
+  [ "$dir" = /tls ] && [ "${TLS:-1}" != "1" ] && continue
+  # (a new file, and a file from an earlier run if there is one)
+  if ! ( : > "$dir/.write-test" ) 2>/dev/null || { [ -e /state/started ] && [ ! -w /state/started ]; }; then
+    echo "ERROR: user id $(id -u) can't write to $dir."
+    if [ "$dir" = /state ]; then
+      echo "       The saved history belongs to another user id (did PUID change?). Either set PUID back, or"
+      echo "       remove it and start afresh: docker compose down; docker volume rm <folder name>_state; docker compose up -d"
+    else
+      echo "       Give it the tls folder next to docker-compose.yml: sudo chown -R $(id -u):$(id -g) tls"
+    fi
+    exit 1
+  fi
+  rm -f "$dir/.write-test"
+done
+
 # ---- folders: everything under /sources, plus config/folders.conf ----
 # mount-folders does the work, so the same code can add or remove a folder later
 # ("mount-folders reload") without restarting the container.

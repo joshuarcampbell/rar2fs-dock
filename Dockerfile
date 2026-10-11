@@ -38,6 +38,15 @@ COPY --from=build /usr/local/bin/rar2fs /usr/local/bin/
 COPY entrypoint.sh /entrypoint.sh
 COPY scripts/ /usr/local/bin/
 
+# The working folders are open to any user (mode 1777, like /tmp), because the container
+# can be told to run as another unprivileged user than the default - PUID / PGID in
+# .env, for Linux hosts where your files belong to someone other than user 1000.
+#
+# For the same reason the list of users (/etc/passwd) can be added to: fusermount refuses
+# to work for a user id that has no name, so the entrypoint gives that user one. Nothing
+# can be gained by editing the list, because no program that could act on it (su, login,
+# passwd ...) keeps its privileges - see below.
+#
 # Everything runs as an unprivileged user. Only the setuid fusermount helpers
 # use SYS_ADMIN, so code parsing archives can't remount /sources writable.
 # Every other setuid/setgid program (su, passwd, mount ...) has that bit removed.
@@ -46,7 +55,9 @@ RUN chmod +x /entrypoint.sh /usr/local/bin/* && ldconfig && rar2fs --version \
  && chmod u+s /usr/bin/mergerfs-fusermount \
  && find / -xdev -type f -perm /6000 ! -name fusermount ! -name mergerfs-fusermount -exec chmod a-s {} + \
  && echo user_allow_other >> /etc/fuse.conf \
- && mkdir -p /view /merged /pass1 /short /state /tls && chown rar2fs:rar2fs /view /merged /pass1 /short /state /tls
+ && chmod 666 /etc/passwd \
+ && mkdir -p /view /merged /pass1 /short /state /tls && chown rar2fs:rar2fs /view /merged /pass1 /short /state /tls \
+ && chmod 1777 /view /merged /pass1 /short /state /tls
 USER rar2fs
 
 HEALTHCHECK --interval=60s --timeout=20s --start-period=60s --retries=3 CMD ["/usr/local/bin/healthcheck"]

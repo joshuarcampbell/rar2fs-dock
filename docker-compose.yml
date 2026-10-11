@@ -17,6 +17,11 @@ services:
     # http://host.docker.internal:<port>. Docker Desktop has that name built in; on a
     # Linux host this line provides it.
     extra_hosts: ["host.docker.internal:host-gateway"]
+    # Which user everything in the container runs as (never root). The default suits
+    # Windows and Mac. On a Linux host, set PUID / PGID in .env to the user and group
+    # your media folders belong to, so the container can read them without their
+    # permissions being changed - linux/setup.sh works this out for you.
+    user: "${PUID:-1000}:${PGID:-1000}"
     # Optional ceilings, so a library scan can't take over the PC. CPU_LIMIT is a number
     # of processor cores (2, or 1.5); MEMORY_LIMIT is an amount such as 4g. 0 = no limit.
     # Set them in .env (see README, "If the PC slows down during scans").
@@ -98,6 +103,8 @@ services:
       # Minutes between rebuilds of the library index (search, recently added, duplicates).
       LIBRARY_INDEX_MINUTES: ${LIBRARY_INDEX_MINUTES:-10}
       # The two ceilings above, passed in only so the status page can show them.
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
       CPU_LIMIT: ${CPU_LIMIT:-0}
       MEMORY_LIMIT: ${MEMORY_LIMIT:-0}
     volumes:

@@ -736,12 +736,20 @@ skips step 6, and `--no-start` only writes the files.
 
 **What's different on Linux:**
 
-- **The container's user must be able to read your folders.** Everything inside runs
-  as user id 1000, and on Linux the folders keep their real permissions. If a folder
-  isn't readable by that user it appears on the drive but can't be opened; the status
-  page marks it *no access* and the setup check says which one. Fix it with
-  `sudo chmod -R o+rX <folder>`, or for that user only:
-  `sudo setfacl -R -m u:1000:rX <folder>`.
+- **The container runs as a user who can read your folders - the script works out
+  who.** On Linux your folders keep their real permissions, and the container never
+  runs as root. So instead of changing permissions on your media, the script picks an
+  ordinary user who can already read all of it - you, or the folders' owner - and
+  writes that to `.env` as `PUID` and `PGID`. Nothing about your files is touched.
+  - If the owner of your folders changes later, run `sudo sh linux/setup.sh --force`
+    again and it follows; `--user 1000:1000` chooses yourself.
+  - If no single user can read every folder (two folders, each private to a different
+    person), it picks whoever can read the most and tells you which folders are left
+    out. Those appear on the drive but can't be opened; the status page marks them
+    *no access*, and the setup check gives the fix.
+  - Changing `PUID` on a setup that has already run also needs the saved history
+    handed over or removed - the container says so, with the command, if it can't
+    use it.
 - **No drive letter, no tray icon.** Those are for Windows. On the machine itself use
   the mounted folders from step 6; other machines connect exactly as described under
   [Using it from other machines](#using-it-from-other-machines) - including Windows
@@ -1483,6 +1491,7 @@ it, under **Every setting** (passwords and tokens are hidden).
 | `AUTO_RESTART` | [Restart](#automatic-restart) after three failed health checks | `1` (on) |
 | `HEALTH_REPORT_DAYS` | Days between scheduled [health reports](#health-report); `0` = never | `7` |
 | `LIBRARY_INDEX_MINUTES` | Minutes between rebuilds of the [library](#the-library-search-recently-added-duplicates-sizes) index | `10` |
+| `PUID`, `PGID` | Linux hosts: the user and group the container runs as, so it can read your folders - see [Running it on Linux](#running-it-on-linux). Never root. | `1000`, `1000` |
 | `CPU_LIMIT`, `MEMORY_LIMIT` | Ceilings for the container - see [If the PC slows down during scans](#if-the-pc-slows-down-during-scans) | none |
 | `RAR2FS_OPTS` | Options passed to rar2fs. The defaults speed up large multi-part sets and pre-read archives at start-up. | `--seek-length=1 -o warmup` |
 | `DIR_CACHE_TIME` | How long the drive remembers a folder's listing before looking again | `15s` |
@@ -1628,7 +1637,8 @@ the mistakes below by itself and says how to fix them.
   rar2fs, mergerfs and rclone run as an unprivileged user with no capabilities. Only
   the small setuid `fusermount` helpers use `SYS_ADMIN`, and only to create the mounts.
   Every other program in the image that could raise its own privileges (`su`,
-  `passwd`, `mount` and so on) has that ability removed.
+  `passwd`, `mount` and so on) has that ability removed. `PUID` can choose which
+  ordinary user that is; the container refuses to start as root.
 - **Password required.** The server is open to your local network, so it always
   needs the login from `.env`. Compose refuses to start without one. Traffic is
   encrypted with [HTTPS](#https) unless you turn that off. Either way, don't expose

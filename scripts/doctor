@@ -47,7 +47,7 @@ while IFS="$TAB" read -r raw type; do
   if [ "$type" = conf ]; then from=$path; shown=$path; else from=$(origin "$raw"); shown=${path#/sources/}; fi
   if ! ls -A "$path" > /dev/null 2>&1; then
     wrong=$((wrong + 1))
-    say bad "$shown can't be read" "The container is not allowed to look inside $from. For a network share, check that the NAS login (NAS_USER / NAS_PASS in .env) may read that folder. On a Linux host, let the container's user (id $(id -u)) read the folder you listed for it in docker-compose.override.yml: sudo chmod -R o+rX <that folder>   or, for that user only: sudo setfacl -R -m u:$(id -u):rX <that folder>"
+    say bad "$shown can't be read" "The container is not allowed to look inside $from. For a network share, check that the NAS login (NAS_USER / NAS_PASS in .env) may read that folder. On a Linux host: the folder belongs to user id $(stat -c '%u' "$path" 2>/dev/null) (group $(stat -c '%g' "$path" 2>/dev/null)), and the container runs as user id $(id -u) (group $(id -g)). Make the container run as the folder's owner: put PUID=$(stat -c '%u' "$path" 2>/dev/null) and PGID=$(stat -c '%g' "$path" 2>/dev/null) in .env and run: docker compose up -d   (sudo sh linux/setup.sh --force works that out for all your folders)."
   elif [ -z "$(ls -A "$path" 2>/dev/null | head -1)" ]; then
     wrong=$((wrong + 1))
     case "$type" in
