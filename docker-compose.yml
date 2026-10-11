@@ -23,50 +23,71 @@ services:
       # Short-names view of the drive (only answers when SHORT_PATHS=1)
       - "${BIND:-0.0.0.0}:8767:8082"
     environment:
-      # --seek-length=1: only read the first volume's header (faster on big sets)
-      # -o warmup: read every archive's header in the background at startup, so
-      #   the first folder listing / Plex scan is fast instead of slow
-      RAR2FS_OPTS: "--seek-length=1 -o warmup"
+      # Every setting comes from .env - you never need to edit this file. The value after
+      # ":-" (or "-") is the default, used when .env doesn't mention the setting.
+      # See .env.example and the README ("Settings") for what each one does.
+      #
+      # ---- the login (required) ----
       WEBDAV_USER: ${WEBDAV_USER:?set WEBDAV_USER in .env}
       WEBDAV_PASS: ${WEBDAV_PASS:?set WEBDAV_PASS in .env}
+      # ---- reading archives ----
+      # --seek-length=1: only read the first volume's header (faster on big sets)
+      # -o warmup: read every archive's header in the background at start-up, so the
+      #   first folder listing / media-server scan is fast instead of slow
+      RAR2FS_OPTS: ${RAR2FS_OPTS:---seek-length=1 -o warmup}
       # Open archives inside archives too (e.g. scene subtitle packs). 0 = off.
-      NESTED_RAR: "1"
-      # Files and folders to hide, ;-separated. Set to "" to show everything.
-      HIDE: "*.sfv;Thumbs.db;desktop.ini;.DS_Store;@Recycle/**;.qsyncclient/**;Sample/**;Proof/**"
-      # Optional: ask Plex to scan a folder as soon as it changes (see README).
-      PLEX_URL: ${PLEX_URL:-}
-      PLEX_TOKEN: ${PLEX_TOKEN:-}
-      PLEX_PATH_MAP: ${PLEX_PATH_MAP:-}
-      # Whether Plex sees the short-names view: auto, 1 or 0 (see README).
-      PLEX_SHORT_NAMES: ${PLEX_SHORT_NAMES:-auto}
-      # Fine-tuning: seconds between checks, seconds to wait after the last change,
-      # and how many folder levels to watch.
-      PLEX_POLL_SECONDS: "60"
-      PLEX_SETTLE_SECONDS: "90"
-      PLEX_WATCH_DEPTH: "4"
-      # Optional: where to send alerts (ntfy topic, Discord or Slack webhook). Set in .env.
-      NOTIFY_URL: ${NOTIFY_URL:-}
-      # Optional, for monitoring apps (see README, "Dashboards and monitoring"):
-      # a URL to ping every minute while healthy, and a read-only token for
-      # status.json and /metrics. Both set in .env.
-      HEARTBEAT_URL: ${HEARTBEAT_URL:-}
-      STATUS_TOKEN: ${STATUS_TOKEN:-}
-      # Restart automatically after 3 failed health checks in a row. 0 = off.
-      AUTO_RESTART: "1"
-      # Run the health report every N days and alert on new problems. 0 = never.
-      HEALTH_REPORT_DAYS: "7"
+      NESTED_RAR: ${NESTED_RAR:-1}
+      # Files and folders to hide, ;-separated. HIDE= (empty) in .env shows everything.
+      HIDE: ${HIDE-*.sfv;Thumbs.db;desktop.ini;.DS_Store;@Recycle/**;.qsyncclient/**;Sample/**;Proof/**}
+      # How long the drive remembers a folder's listing, and extra options for the
+      # WebDAV server (rclone serve webdav) for the rare case you need one.
+      DIR_CACHE_TIME: ${DIR_CACHE_TIME:-15s}
+      RCLONE_OPTS: ${RCLONE_OPTS:-}
+      # ---- HTTPS and logins ----
       # HTTPS is on by default, with a certificate the container creates in ./tls.
-      # TLS_HOSTS (in .env) lists the addresses or names other devices use for this PC.
-      # Set TLS=0 in .env for plain HTTP (see README, "HTTPS").
+      # TLS_HOSTS lists the addresses or names other devices use for this PC.
       TLS: ${TLS:-1}
       TLS_HOSTS: ${TLS_HOSTS:-}
       # Wrong logins allowed in 10 seconds before new logins are refused for a while.
-      LOGIN_GUESS_LIMIT: "5"
-      # Optional: a second view of the drive, on port 8767, where paths that are too
-      # long for Windows are shortened. Set SHORT_PATHS=1 in .env (see README).
+      LOGIN_GUESS_LIMIT: ${LOGIN_GUESS_LIMIT:-5}
+      # ---- short names for Windows ----
+      # A second view of the drive, on port 8767, where paths that are too long for
+      # Windows are shortened. MAX_PATH is the longest path allowed in that view,
+      # counted from the drive root.
       SHORT_PATHS: ${SHORT_PATHS:-0}
-      # Longest path allowed in that view, counted from the drive root.
-      MAX_PATH: "230"
+      MAX_PATH: ${MAX_PATH:-230}
+      # ---- telling media servers about new files (see README) ----
+      PLEX_URL: ${PLEX_URL:-}
+      PLEX_TOKEN: ${PLEX_TOKEN:-}
+      PLEX_PATH_MAP: ${PLEX_PATH_MAP:-}
+      PLEX_SHORT_NAMES: ${PLEX_SHORT_NAMES:-auto}
+      JELLYFIN_URL: ${JELLYFIN_URL:-}
+      JELLYFIN_API_KEY: ${JELLYFIN_API_KEY:-}
+      JELLYFIN_PATH_MAP: ${JELLYFIN_PATH_MAP:-}
+      JELLYFIN_SHORT_NAMES: ${JELLYFIN_SHORT_NAMES:-auto}
+      EMBY_URL: ${EMBY_URL:-}
+      EMBY_API_KEY: ${EMBY_API_KEY:-}
+      EMBY_PATH_MAP: ${EMBY_PATH_MAP:-}
+      EMBY_SHORT_NAMES: ${EMBY_SHORT_NAMES:-auto}
+      # Seconds between looks, seconds to wait after the last change, and how many
+      # folder levels to watch. (The PLEX_ names are from before Jellyfin and Emby were
+      # supported; they apply to all three.)
+      PLEX_POLL_SECONDS: ${PLEX_POLL_SECONDS:-60}
+      PLEX_SETTLE_SECONDS: ${PLEX_SETTLE_SECONDS:-90}
+      PLEX_WATCH_DEPTH: ${PLEX_WATCH_DEPTH:-4}
+      # ---- watching over it ----
+      # Where to send alerts (ntfy topic, Discord or Slack webhook).
+      NOTIFY_URL: ${NOTIFY_URL:-}
+      # For monitoring apps: a URL to ping every minute while healthy, and a read-only
+      # token for status.json and /metrics.
+      HEARTBEAT_URL: ${HEARTBEAT_URL:-}
+      STATUS_TOKEN: ${STATUS_TOKEN:-}
+      # Restart automatically after 3 failed health checks in a row. 0 = off.
+      AUTO_RESTART: ${AUTO_RESTART:-1}
+      # Run the health report every N days and alert on new problems. 0 = never.
+      HEALTH_REPORT_DAYS: ${HEALTH_REPORT_DAYS:-7}
+      # Minutes between rebuilds of the library index (search, recently added, duplicates).
+      LIBRARY_INDEX_MINUTES: ${LIBRARY_INDEX_MINUTES:-10}
     volumes:
       # Extra logins: config/users.htpasswd (see README, "More logins")
       - "./config:/config:ro"

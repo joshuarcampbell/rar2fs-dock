@@ -217,6 +217,14 @@ $remount.add_Click({
     $tray.ShowBalloonTip(4000, "rar2fs-dock", "Remounting the drive...", [System.Windows.Forms.ToolTipIcon]::Info)
 })
 $restart.add_Click({
+    # don't cut off someone's film without asking
+    $busy = @(& (Join-Path $PSScriptRoot "in-use.ps1") -Quiet)
+    if ($busy) {
+        $list = ($busy | Select-Object -First 5 | ForEach-Object { "$(@($_.users) -join ', ') is reading $($_.path)" }) -join "`n"
+        $answer = [System.Windows.Forms.MessageBox]::Show("The drive is in use right now:`n`n$list`n`nRestarting interrupts that for about a minute. Restart anyway?",
+            "rar2fs-dock", [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning)
+        if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+    }
     Start-Process docker.exe -WindowStyle Hidden -WorkingDirectory $repo -ArgumentList "compose", "restart"
     $tray.ShowBalloonTip(4000, "rar2fs-dock", "Restarting the container. The drive comes back by itself in about a minute.", [System.Windows.Forms.ToolTipIcon]::Info)
 })

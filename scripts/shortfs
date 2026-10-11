@@ -95,7 +95,7 @@ class ShortFS(Operations):
         self.max_path = max_path
         self.cache = {}             # shown folder path -> (expires, {shown name: real name})
         self.needs = {}             # real folder path -> (expires, room its contents need)
-        self.lock = threading.Lock()
+        self.mutex = threading.Lock()     # not "lock": that name is a FUSE operation
 
     # ---- name mapping ----
 
@@ -103,7 +103,7 @@ class ShortFS(Operations):
         """Characters that must stay free below a folder for the names inside it,
         as (its longest file name, a subfolder plus that subfolder's longest file)."""
         now = time.monotonic()
-        with self.lock:
+        with self.mutex:
             hit = self.needs.get(real_dir)
             if hit and hit[0] > now:
                 return hit[1]
@@ -128,7 +128,7 @@ class ShortFS(Operations):
                 below = self._room_needed(real_dir + '/' + sub, depth - 1)[0]
                 if below:
                     deeper = max(deeper, min(len(sub), SUBFOLDER) + 1 + below)
-        with self.lock:
+        with self.mutex:
             if len(self.needs) > 50000:
                 self.needs.clear()
             self.needs[real_dir] = (now + TTL, (need, deeper))
@@ -137,7 +137,7 @@ class ShortFS(Operations):
     def _table(self, shown_dir, real_dir):
         """{shown name: real name} for one folder."""
         now = time.monotonic()
-        with self.lock:
+        with self.mutex:
             hit = self.cache.get(shown_dir)
             if hit and hit[0] > now:
                 return hit[1]
@@ -166,7 +166,7 @@ class ShortFS(Operations):
                 while shown in table:           # tag clash - vanishingly rare
                     shown += '_'
                 table[shown] = name
-        with self.lock:
+        with self.mutex:
             if len(self.cache) > 20000:
                 self.cache.clear()
             self.cache[shown_dir] = (now + TTL, table)

@@ -87,6 +87,11 @@ if (-not $driveVisible) {
     Write-Host "Making it visible (read-only) restarts the container once - about a minute, during which"
     Write-Host "the drive and anything reading from it (Plex) pause. After that, folders on $($letter.ToUpper()): need no restart."
     if (-not $Yes) {
+        $busy = @(& (Join-Path $PSScriptRoot "in-use.ps1") -Quiet)
+        if ($busy) {
+            Write-Host "The drive is in use right now:" -ForegroundColor Yellow
+            $busy | ForEach-Object { Write-Host "   $(@($_.users) -join ', ') is reading $($_.path)" }
+        }
         $answer = Read-Host "Do that now? [y/N]"
         if ($answer.Trim() -notmatch '^(y|yes)$') { Write-Host "Nothing was changed."; exit 1 }
     }

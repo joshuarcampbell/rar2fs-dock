@@ -5,3 +5,4 @@ tls/
 docker-compose.override.yml
 config/folders.conf
 docker-compose.yml.before-update
+config/passwords.conf

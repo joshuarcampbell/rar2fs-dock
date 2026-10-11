@@ -11,7 +11,8 @@
 # them into docker-compose.override.yml first, so the update can't overwrite them.
 param(
     [switch]$NoPull,      # rebuild and restart what is already here
-    [switch]$NoStart      # pull (and move folders) only; don't touch the container or the drive
+    [switch]$NoStart,     # pull (and move folders) only; don't touch the container or the drive
+    [switch]$Force        # restart even if something is being read from the drive
 )
 
 $ErrorActionPreference = 'Stop'
@@ -86,6 +87,14 @@ if ($changed -contains "docker-compose.yml") {
 if ($changed -and -not $NoPull) {
     Stop-Update ("You have changed these files, and the update would overwrite them: " + ($changed -join ", ") +
         ". Undo your changes (git checkout -- <file>) or keep them elsewhere, then run this again.")
+}
+
+# ---------------------------------------------------------------- is anyone watching?
+# The update restarts the container, which pauses the drive for about a minute.
+if (-not $NoStart -and -not $Force) {
+    if (-not (& (Join-Path $PSScriptRoot "in-use.ps1") -AskBefore "Updating")) {
+        Stop-Update "Nothing was changed. Run this again later, or with -Force."
+    }
 }
 
 # ---------------------------------------------------------------- pull

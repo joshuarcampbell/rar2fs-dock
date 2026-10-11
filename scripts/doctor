@@ -3,7 +3,7 @@
 # words, what is wrong and what to do about it.
 #
 #   doctor          the quick checks - run with every status page build
-#   doctor --full   also asks Plex whether its address and token work
+#   doctor --full   also asks Plex, Jellyfin and Emby whether their address and token work
 #
 # One line per finding:   level<TAB>what<TAB>details      (level: ok, warn or bad)
 #
@@ -98,30 +98,49 @@ if [ "${TLS:-1}" = "1" ] && [ -f /tls/cert.pem ]; then
   fi
 fi
 
-# ---- Plex refresh ----
-if [ -n "$PLEX_URL" ] && [ -n "$PLEX_TOKEN" ]; then
-  plex_wrong=0
-  if [ -z "$PLEX_PATH_MAP" ]; then
-    plex_wrong=1
-    say warn "Plex refresh" "PLEX_PATH_MAP is empty, so Plex can't be told which of its folders changed. Set it in .env (see the README)."
+# ---- media servers: instant refresh for Plex, Jellyfin and Emby ----
+# name, address, token or key, path map
+check_server() {
+  name=$1; url=${2%/}; secret=$3; map=$4
+  [ -n "$url" ] && [ -n "$secret" ] || return 0
+  what="$name refresh"; wrong=0
+  if [ -z "$map" ]; then
+    wrong=1
+    say warn "$what" "Its path map is empty, so $name can't be told which of its folders changed. Set it in .env (see the README)."
   else
-    for name in $(printf '%s' "$PLEX_PATH_MAP" | tr ';' '\n' | sed -n 's/^[[:space:]]*\([^=/]*\).*=.*/\1/p' | sort -u); do
-      cut -f1 "$STATE" 2>/dev/null | grep -qxF "$name" && continue
-      plex_wrong=1
-      say warn "Plex refresh" "PLEX_PATH_MAP mentions \"$name\", but no shared folder has that name. Shared: $(cut -f1 "$STATE" 2>/dev/null | tr '\n' ' ')"
+    for folder in $(printf '%s' "$map" | tr ';' '\n' | sed -n 's/^[[:space:]]*\([^=/]*\).*=.*/\1/p' | sort -u); do
+      cut -f1 "$STATE" 2>/dev/null | grep -qxF "$folder" && continue
+      wrong=1
+      say warn "$what" "Its path map mentions \"$folder\", but no shared folder has that name. Shared: $(cut -f1 "$STATE" 2>/dev/null | tr '\n' ' ')"
     done
   fi
   if [ "$full" = 1 ]; then
-    # the token goes in on stdin, so it never shows in a process list
-    code=$(printf 'header = "X-Plex-Token: %s"\n' "$PLEX_TOKEN" | curl -sk -m 6 -o /dev/null -w '%{http_code}' -K - "${PLEX_URL%/}/library/sections" 2>/dev/null)
-    case "$code" in
-      200) [ "$plex_wrong" = 0 ] && say ok "Plex refresh" "Plex answers at $PLEX_URL and accepts the token." ;;
-      401) say bad "Plex refresh" "Plex answers at $PLEX_URL but turned down PLEX_TOKEN. Get a fresh token (see the README) and put it in .env." ;;
-      000) say bad "Plex refresh" "Nothing answers at $PLEX_URL. Check the address, and that Plex is running and reachable from this PC." ;;
-      *)   say warn "Plex refresh" "Plex at $PLEX_URL answered with code $code, not the expected 200." ;;
+    # the token or key goes in on stdin, so it never shows in a process list
+    case "$name" in
+      Plex)     code=$(printf 'header = "X-Plex-Token: %s"\n' "$secret" | curl -sk -m 6 -o /dev/null -w '%{http_code}' -K - "$url/library/sections" 2>/dev/null) ;;
+      Jellyfin) code=$(printf 'header = "Authorization: MediaBrowser Token=\\"%s\\""\n' "$secret" | curl -sk -m 6 -o /dev/null -w '%{http_code}' -K - "$url/System/Info" 2>/dev/null) ;;
+      Emby)     code=$(printf 'header = "X-Emby-Token: %s"\n' "$secret" | curl -sk -m 6 -o /dev/null -w '%{http_code}' -K - "$url/emby/System/Info" 2>/dev/null) ;;
     esac
-  elif [ "$plex_wrong" = 0 ]; then
-    say ok "Plex refresh" "On, for: $(printf '%s' "$PLEX_PATH_MAP" | tr ';' '\n' | sed -n 's/^[[:space:]]*\([^=]*\)=.*/\1/p' | tr '\n' ' ')"
+    case "$code" in
+      200) [ "$wrong" = 0 ] && say ok "$what" "$name answers at $url and accepts the token." ;;
+      401|403) say bad "$what" "$name answers at $url but turned down its token or key. Get a fresh one (see the README) and put it in .env." ;;
+      000) say bad "$what" "Nothing answers at $url. Check the address, and that $name is running and reachable from this PC." ;;
+      *)   say warn "$what" "$name at $url answered with code $code, not the expected 200." ;;
+    esac
+  elif [ "$wrong" = 0 ]; then
+    say ok "$what" "On, for: $(printf '%s' "$map" | tr ';' '\n' | sed -n 's/^[[:space:]]*\([^=]*\)=.*/\1/p' | tr '\n' ' ')"
   fi
+}
+check_server Plex     "$PLEX_URL"     "$PLEX_TOKEN"       "$PLEX_PATH_MAP"
+check_server Jellyfin "$JELLYFIN_URL" "$JELLYFIN_API_KEY" "$JELLYFIN_PATH_MAP"
+check_server Emby     "$EMBY_URL"     "$EMBY_API_KEY"     "$EMBY_PATH_MAP"
+
+# ---- archive passwords (config/passwords.conf) ----
+if [ -f /config/passwords.conf ]; then
+  if [ -s /tmp/passwords.problems ]; then
+    while IFS= read -r line; do say warn "passwords.conf" "$line"; done < /tmp/passwords.problems
+  fi
+  n=$(grep -c '^\[' /tmp/rarconfig 2>/dev/null || echo 0)
+  [ "$n" -gt 0 ] && say ok "Archive passwords" "$n archive(s) have a password."
 fi
 exit 0

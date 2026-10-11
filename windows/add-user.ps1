@@ -20,5 +20,10 @@ $existing = @()
 if (Test-Path $file) { $existing = @(Get-Content $file | Where-Object { $_ -notmatch "^$([regex]::Escape($Name)):" }) }
 [IO.File]::WriteAllLines($file, [string[]]($existing + $line))
 
+# a new login is only read when the container starts
+if (-not (& (Join-Path $PSScriptRoot "in-use.ps1") -AskBefore "Restarting the container")) {
+    Write-Host "Login '$Name' is saved, but not active yet. Restart when it suits: docker compose restart"
+    exit 0
+}
 docker compose --project-directory $repo restart | Out-Null
 Write-Host "Login '$Name' added. Remove it by deleting its line from config\users.htpasswd."

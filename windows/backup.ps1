@@ -2,7 +2,7 @@
 # this PC or moved to another:
 #   .env                          your settings and passwords
 #   docker-compose.override.yml   your folder list
-#   config\                       extra logins, folders added without a restart
+#   config\                       extra logins, folders added without a restart, archive passwords
 #   tls\                          the HTTPS certificate and its private key
 #
 #     .\windows\backup.ps1                  -> a zip in your Documents folder

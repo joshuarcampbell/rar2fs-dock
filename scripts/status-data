@@ -31,7 +31,10 @@ if newer "$rar2fs_latest" "$RAR2FS_VERSION"; then rar2fs_update=true; else rar2f
 
 # ---- health report ----
 report=$www/health-report.txt
-count() { sed -n "s/^== $1: \([0-9][0-9]*\)$/\1/p" "$report" 2>/dev/null | head -1; }
+# per kind, without the problems marked "ignore" (see report-counts)
+report-counts > "$tmp/counts" 2>/dev/null
+count() { awk -F '\t' -v k="$1" '$1 == k { print $2; exit }' "$tmp/counts"; }
+r_ignored=$(awk -F '\t' '{ n += $3 } END { print n + 0 }' "$tmp/counts")
 if [ -f "$report" ]; then
   r_scope=$(sed -n '1s/^Health report for: //p' "$report"); r_finished=$(stat -c %Y "$report")
 else
@@ -62,6 +65,12 @@ fi
 jq -R -s 'split("\n") | map(select(length > 0) | split("\t") | {level: .[0], title: .[1], detail: (.[2] // "")})' \
   /state/doctor.tsv > "$tmp/checks" 2>/dev/null || echo '[]' > "$tmp/checks"
 
+# ---- what is being read right now (written by activity; ignored if it has gone stale) ----
+if ! jq -e --argjson now "$(date +%s)" '(.updated // 0) > $now - 30' /tmp/activity.json > /dev/null 2>&1 \
+   || ! jq '{reading, browsing}' /tmp/activity.json > "$tmp/activity" 2>/dev/null; then
+  echo '{"reading": [], "browsing": []}' > "$tmp/activity"
+fi
+
 on() { [ "$1" = "$2" ] && echo true || echo false; }
 if [ -n "$PLEX_URL" ] && [ -n "$PLEX_TOKEN" ]; then plex=true; else plex=false; fi
 if [ -n "$NOTIFY_URL" ]; then notify=true; else notify=false; fi
@@ -69,10 +78,11 @@ if [ -n "$NOTIFY_URL" ]; then notify=true; else notify=false; fi
 jq -n \
   --arg health "$health" --arg detail "$detail" \
   --argjson generated "$(date +%s)" --argjson started "$(num "$(cat /state/started 2>/dev/null)")" \
-  --slurpfile folders "$tmp/folders" --slurpfile events "$tmp/events" --slurpfile checks "$tmp/checks" \
+  --slurpfile folders "$tmp/folders" --slurpfile events "$tmp/events" --slurpfile checks "$tmp/checks" --slurpfile activity "$tmp/activity" \
   --arg unrar "$UNRAR_VERSION" --arg unrar_latest "$unrar_latest" --argjson unrar_update "$unrar_update" \
   --arg rar2fs "$RAR2FS_VERSION" --arg rar2fs_latest "$rar2fs_latest" --argjson rar2fs_update "$rar2fs_update" \
   --argjson r_running "$r_running" --arg r_scope "$r_scope" --argjson r_finished "$(num "$r_finished")" \
+  --argjson r_ignored "$r_ignored" \
   --argjson c_empty "$(num "$(count 'Empty folders')")" \
   --argjson c_missing "$(num "$(count 'RAR sets with missing parts')")" \
   --argjson c_orphan "$(num "$(count 'RAR parts with no main .rar file')")" \
@@ -91,6 +101,7 @@ jq -n \
       folders_total: ($folders | length),
       folders_mounted: ($folders | map(select(.mounted)) | length),
       updates_available: ([$unrar_update, $rar2fs_update] | map(select(.)) | length),
+      reading_now: ($activity[0].reading | length),
       setup_problems: ($checks[0] | map(select(.level != "ok")) | length),
       report_problems: (if $r_finished == null then null else ($counts | map(. // 0) | add) end),
       restarts_last_hour: $restarts,
@@ -99,11 +110,12 @@ jq -n \
       duplicates: $l_dupes,
       folders: $folders,
       setup_check: ($checks[0] | map(select(.level != "ok"))),
+      activity: $activity[0],
       versions: {
         unrar:  {installed: $unrar,  latest: (if $unrar_latest  == "" then null else $unrar_latest  end), update_available: $unrar_update},
         rar2fs: {installed: $rar2fs, latest: (if $rar2fs_latest == "" then null else $rar2fs_latest end), update_available: $rar2fs_update}
       },
-      report: {running: $r_running, scope: (if $r_scope == "" then null else $r_scope end), finished: $r_finished, counts: $counts},
+      report: {running: $r_running, scope: (if $r_scope == "" then null else $r_scope end), finished: $r_finished, counts: $counts, ignored: $r_ignored},
       settings: {https: $https, short_names: $short, auto_restart: $auto_restart, plex_refresh: $plex, notifications: $notify},
       events: ($events | reverse)
     }' > "$tmp/status.json" || exit 1
@@ -152,6 +164,9 @@ jq -r '
     "# TYPE rar2fs_dock_library_bytes gauge",
     "rar2fs_dock_library_bytes \(.library_bytes)"
   end),
+  "# HELP rar2fs_dock_reading_now Files being read from the drive right now.",
+  "# TYPE rar2fs_dock_reading_now gauge",
+  "rar2fs_dock_reading_now \(.reading_now)",
   "# HELP rar2fs_dock_setup_problems Things the setup check found wrong (an empty source folder, a certificate about to run out ...).",
   "# TYPE rar2fs_dock_setup_problems gauge",
   "rar2fs_dock_setup_problems \(.setup_problems)",

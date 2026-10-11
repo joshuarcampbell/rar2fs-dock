@@ -61,6 +61,47 @@ plan() {
       END { for (n in m) printf "%s\t%s\n", n, m[n] }' | sort
 }
 
+# Passwords for encrypted archives: config/passwords.conf, one per line,
+#     <archive file name> = <password>
+# The name is the set's first file (x.rar, or x.part01.rar), without its folder; * in
+# it stands for anything. rar2fs wants its own format and exact names, so this writes
+# /tmp/rarconfig for it - looking up which archives a name with * means - and notes
+# lines it couldn't use in /tmp/passwords.problems, for doctor to show.
+# rar2fs reads the result when a folder is mounted, so a change needs a restart.
+PASSWORDS=/config/passwords.conf
+RARCONFIG=/tmp/rarconfig
+write_rarconfig() {  # (searches the folders in /tmp/folders.plan for names with *)
+  rm -f "$RARCONFIG" /tmp/passwords.problems
+  [ -f "$PASSWORDS" ] || return 0
+  ( umask 077; : > "$RARCONFIG" ); : > /tmp/passwords.problems
+  tr -d '\r' < "$PASSWORDS" | while IFS= read -r line; do
+    line=$(printf '%s' "$line" | sed 's/^[[:space:]]*//')
+    case "$line" in ''|'#'*) continue ;; esac
+    case "$line" in *=*) ;; *) echo "\"$line\" has no = in it - skipped" >> /tmp/passwords.problems; continue ;; esac
+    pattern=$(printf '%s' "${line%%=*}" | sed 's/[[:space:]]*$//')
+    password=$(printf '%s' "${line#*=}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    [ -n "$pattern" ] && [ -n "$password" ] || { echo "\"$line\" needs a name and a password - skipped" >> /tmp/passwords.problems; continue; }
+    case "$pattern" in
+      */*) echo "\"$pattern\": give the file name only, without its folder - skipped" >> /tmp/passwords.problems; continue ;;
+      *'*'*|*'?'*)
+        cut -f2 /tmp/folders.plan | tr ':' '\n' | while IFS= read -r member; do
+          find "$member" -type f -iname '*.rar' -iname "$pattern" -printf '%f\n' 2>/dev/null
+        done | sort -u > /tmp/passwords.names
+        [ -s /tmp/passwords.names ] || echo "\"$pattern\" matches no archive - check the name" >> /tmp/passwords.problems ;;
+      *) printf '%s\n' "$pattern" > /tmp/passwords.names ;;
+    esac
+    while IFS= read -r archive; do
+      case "$archive" in *']'*) echo "\"$archive\" has a ] in its name, which rar2fs can't take a password for" >> /tmp/passwords.problems; continue ;; esac
+      printf '[%s]\npassword = "%s"\n' "$archive" "$password" >> "$RARCONFIG"
+    done < /tmp/passwords.names
+  done
+  rm -f /tmp/passwords.names
+  [ -s "$RARCONFIG" ] && say "passwords: $(grep -c '^\[' "$RARCONFIG") archive(s) have one"
+  return 0
+}
+# the rar2fs option for it, when there is anything in the file
+rarconfig_opt() { [ -s "$RARCONFIG" ] && printf '%s' "--config=$RARCONFIG"; }
+
 mount_name() {  # name, members
   name=$1; members=$2
   case "$members" in
@@ -73,13 +114,13 @@ mount_name() {  # name, members
   esac
   if [ "${NESTED_RAR:-1}" = "1" ]; then
     mkdir -p "/pass1/$name"
-    rar2fs -o allow_other,ro $RAR2FS_OPTS "$src" "/pass1/$name" || { say "ERROR: could not mount $name"; return 1; }
+    rar2fs -o allow_other,ro $RAR2FS_OPTS $(rarconfig_opt) "$src" "/pass1/$name" || { say "ERROR: could not mount $name"; return 1; }
     echo "/pass1/$name" >> "$EXPECTED"
     src="/pass1/$name"
   fi
   mkdir -p "/view/$name"
   echo "rar2fs: $src -> /view/$name"
-  rar2fs -o allow_other,ro $RAR2FS_OPTS "$src" "/view/$name" || { say "ERROR: could not mount $name"; return 1; }
+  rar2fs -o allow_other,ro $RAR2FS_OPTS $(rarconfig_opt) "$src" "/view/$name" || { say "ERROR: could not mount $name"; return 1; }
   echo "/view/$name" >> "$EXPECTED"
   printf '%s\t%s\n' "$name" "$members" >> "$STATE"
 }
@@ -118,6 +159,7 @@ case "${1:-}" in
     mkdir -p /view /merged /pass1
     : > "$EXPECTED"; : > "$STATE"
     plan > /tmp/folders.plan
+    write_rarconfig < /dev/null
     while IFS="$TAB" read -r name members; do
       mount_name "$name" "$members" < /dev/null || true
     done < /tmp/folders.plan
@@ -127,6 +169,7 @@ case "${1:-}" in
   reload)
     touch "$EXPECTED" "$STATE"
     plan > /tmp/folders.plan
+    write_rarconfig < /dev/null
     changed=0
     # gone, or made of different folders now: unmount (a changed one is mounted again below)
     cp "$STATE" /tmp/folders.before

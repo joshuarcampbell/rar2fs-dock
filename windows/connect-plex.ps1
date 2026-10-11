@@ -88,6 +88,10 @@ $original = $envLines -join "`n"
 $folders = @(Invoke-Docker exec rar2fs cut -f1 /tmp/folders.state | Where-Object { $_ })
 if (-not $folders) { Stop-Setup "The container isn't sharing any folders yet. Add some first (see .\windows\doctor.ps1)." }
 Note "The container is running and shares: $($folders -join ', ')"
+# this ends with a restart of the container, so say now if that would interrupt someone
+if (-not $DryRun -and -not (& (Join-Path $PSScriptRoot "in-use.ps1") -AskBefore "Connecting the Plex PC restarts the container, which")) {
+    Stop-Setup "Nothing was changed. Run this again when the drive isn't in use."
+}
 
 # ---------------------------------------------------------------- the Plex PC
 Step "The PC that runs Plex"

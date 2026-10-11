@@ -1,26 +1,55 @@
 #!/bin/sh
-# Watches the source folders and asks Plex to scan just the folder that changed.
-# Started by the entrypoint when PLEX_URL and PLEX_TOKEN are set.
+# Watches the source folders and tells your media server to scan just the folder that
+# changed. Works with Plex, Jellyfin and Emby - any of them, or several at once.
+# Started by the entrypoint when at least one is set up:
 #
-#   PLEX_URL            e.g. http://192.168.1.20:32400, or for Plex on this same PC
-#                       http://host.docker.internal:32400
-#   PLEX_TOKEN          your X-Plex-Token
-#   PLEX_PATH_MAP       where each folder is mounted on the Plex server, ;-separated:
-#                       tv=/mnt/media/tv;films=/mnt/media/films      (Plex on Linux)
-#                       tv=Y:\tv;films=Y:\films                      (Plex on Windows)
-#   PLEX_SHORT_NAMES    whether Plex sees the shortened names of the short-names view:
+#   Plex       PLEX_URL      e.g. http://192.168.1.20:32400, or for Plex on this same PC
+#                            http://host.docker.internal:32400
+#              PLEX_TOKEN    your X-Plex-Token
+#   Jellyfin   JELLYFIN_URL  e.g. http://192.168.1.20:8096
+#              JELLYFIN_API_KEY   from Dashboard > API Keys
+#   Emby       EMBY_URL      e.g. http://192.168.1.20:8096
+#              EMBY_API_KEY       from Settings > API Keys
+#
+# and for each of them (shown for Plex; JELLYFIN_... and EMBY_... are the same):
+#
+#   PLEX_PATH_MAP       where each folder is mounted on that server, ;-separated:
+#                       tv=/mnt/media/tv;films=/mnt/media/films      (server on Linux)
+#                       tv=Y:\tv;films=Y:\films                      (server on Windows)
+#   PLEX_SHORT_NAMES    whether it sees the shortened names of the short-names view:
 #                       auto (default) = yes for Windows paths when SHORT_PATHS=1,
 #                       1 = always, 0 = never
+#
+# Timing, shared by all three (the names are from when only Plex was supported):
+#
 #   PLEX_POLL_SECONDS   how often to look for changes (default 60)
 #   PLEX_SETTLE_SECONDS wait after the last change before scanning (default 90)
 #   PLEX_WATCH_DEPTH    how many folder levels to watch (default 4)
+#
+# How each is told:
+#   Plex      GET  /library/sections/<library>/refresh?path=<folder>   (X-Plex-Token)
+#   Jellyfin  POST /Library/Media/Updated  {"Updates":[{"Path":...}]}  (Authorization: MediaBrowser Token="...")
+#   Emby      POST /emby/Library/Media/Updated, same body              (X-Emby-Token)
 
 POLL=${PLEX_POLL_SECONDS:-60}
 SETTLE=${PLEX_SETTLE_SECONDS:-90}
 DEPTH=${PLEX_WATCH_DEPTH:-4}
 dir=$(mktemp -d)
 export LC_ALL=C     # comm needs byte-order sorting
-log() { echo "plex-refresh: $*"; }
+log() { echo "media-refresh: $*"; }
+
+# which servers are set up
+servers=""
+[ -n "$PLEX_URL" ] && [ -n "$PLEX_TOKEN" ] && servers="$servers plex"
+[ -n "$JELLYFIN_URL" ] && [ -n "$JELLYFIN_API_KEY" ] && servers="$servers jellyfin"
+[ -n "$EMBY_URL" ] && [ -n "$EMBY_API_KEY" ] && servers="$servers emby"
+[ -n "$servers" ] || { log "no media server is set up - nothing to do"; exit 0; }
+# (printf, not echo: a Windows path such as Y:\tv holds backslashes, which echo would
+# turn into tabs and the like)
+title()    { case "$1" in plex) printf 'Plex' ;; jellyfin) printf 'Jellyfin' ;; emby) printf 'Emby' ;; esac; }
+url_of()   { case "$1" in plex) printf '%s' "${PLEX_URL%/}" ;; jellyfin) printf '%s' "${JELLYFIN_URL%/}" ;; emby) printf '%s' "${EMBY_URL%/}" ;; esac; }
+map_of()   { case "$1" in plex) printf '%s' "$PLEX_PATH_MAP" ;; jellyfin) printf '%s' "$JELLYFIN_PATH_MAP" ;; emby) printf '%s' "$EMBY_PATH_MAP" ;; esac; }
+short_of() { case "$1" in plex) printf '%s' "${PLEX_SHORT_NAMES:-auto}" ;; jellyfin) printf '%s' "${JELLYFIN_SHORT_NAMES:-auto}" ;; emby) printf '%s' "${EMBY_SHORT_NAMES:-auto}" ;; esac; }
 
 # Folders added through config/folders.conf live outside /sources (see mount-folders).
 # Looked up at every poll, so one added while this runs is watched from then on.
@@ -39,19 +68,31 @@ snapshot() {
   } | sort
 }
 
+# Requests. The token or key goes in on stdin, so it never shows in a process list.
 plex() {  # path-and-query, extra curl args...
-  url="$PLEX_URL$1"; shift
+  url="$(url_of plex)$1"; shift
   printf 'header = "X-Plex-Token: %s"\nheader = "Accept: application/json"\n' "$PLEX_TOKEN" |
     curl -fsS -m 20 -K - "$@" "$url"
 }
+updated() {  # jellyfin|emby, path on that server
+  body=$(jq -n --arg p "$2" '{Updates: [{Path: $p, UpdateType: "Modified"}]}')
+  if [ "$1" = jellyfin ]; then
+    printf 'header = "Authorization: MediaBrowser Token=\\"%s\\""\n' "$JELLYFIN_API_KEY" |
+      curl -fsS -m 20 -K - -H 'Content-Type: application/json' --data-binary "$body" "$(url_of jellyfin)/Library/Media/Updated"
+  else
+    printf 'header = "X-Emby-Token: %s"\n' "$EMBY_API_KEY" |
+      curl -fsS -m 20 -K - -H 'Content-Type: application/json' --data-binary "$body" "$(url_of emby)/emby/Library/Media/Updated"
+  fi
+}
 
-# /sources/tv@e/Show -> tv/Show -> /mnt/media/tv/Show or Y:\tv\Show (via PLEX_PATH_MAP)
-# /drives/e/Concerts/Live -> concerts/Live -> ...   (a folder from config/folders.conf)
-plex_path() {
-  case "$1" in
-    /sources/*) rel=${1#/sources/}; top=${rel%%/*}; rel="${top%%@*}${rel#"$top"}" ;;
+# Where a source folder is on a media server, through that server's path map:
+#   /sources/tv@e/Show      -> tv/Show       -> /mnt/media/tv/Show or Y:\tv\Show
+#   /drives/e/Concerts/Live -> concerts/Live -> ...   (a folder from config/folders.conf)
+server_path() {  # server, source path
+  case "$2" in
+    /sources/*) rel=${2#/sources/}; top=${rel%%/*}; rel="${top%%@*}${rel#"$top"}" ;;
     *)  # the longest folder in folders.state that contains the path gives the name
-        rel=$(awk -F '\t' -v p="$1" '
+        rel=$(awk -F '\t' -v p="$2" '
           { n = split($2, m, ":")
             for (i = 1; i <= n; i++) if ((p == m[i] || index(p, m[i] "/") == 1) && length(m[i]) > best) { best = length(m[i]); name = $1 } }
           END { if (best) printf "%s%s", name, substr(p, best + 1) }' "$STATE" 2>/dev/null)
@@ -59,7 +100,7 @@ plex_path() {
   esac
   best=""; target=""
   old_ifs=$IFS; IFS=';'
-  for pair in $PLEX_PATH_MAP; do
+  for pair in $(map_of "$1"); do
     k=${pair%%=*}; v=${pair#*=}
     case "$rel/" in
       "$k"/*) [ ${#k} -gt ${#best} ] && { best=$k; target=$v; } ;;
@@ -73,8 +114,8 @@ plex_path() {
   # Y:/tv works as well as Y:\tv
   [ "$windows" = 1 ] && target=$(printf '%s' "$target" | tr '/' '\\')
 
-  # Plex on the short-names view sees shortened folder names, so ask for those
-  short=${PLEX_SHORT_NAMES:-auto}
+  # a server on the short-names view sees shortened folder names, so ask for those
+  short=$(short_of "$1")
   [ "$short" = "auto" ] && { [ "$windows" = 1 ] && [ "${SHORT_PATHS:-0}" = "1" ] && short=1 || short=0; }
   if [ "$short" = "1" ]; then
     shown=$(shortfs /view --show "$rel" --max-path "${MAX_PATH:-230}" 2>/dev/null) && [ -n "$shown" ] && rel=$shown
@@ -85,29 +126,32 @@ plex_path() {
   printf '%s' "$target$rest"
 }
 
-scan() {  # source path
-  p=$(plex_path "$1")
-  [ -n "$p" ] || { log "no PLEX_PATH_MAP entry covers ${1#/sources/} - skipped"; return; }
-  # Compare with / separators; Windows paths also ignore upper/lower case
-  key=$(jq -r --arg p "$p" '
-    ($p | test("^[A-Za-z]:|\\\\")) as $win
-    | def norm: (if $win then ascii_downcase else . end) | gsub("\\\\"; "/") | sub("/+$"; "") + "/";
-    ($p | norm) as $want
-    | [.MediaContainer.Directory[] | .key as $k | .Location[] | {k: $k, l: (.path | norm)}
-       | select(.l as $l | $want | startswith($l))] | sort_by(.l | length) | last | .k // empty' "$dir/sections")
-  [ -n "$key" ] || { log "no Plex library contains $p - skipped"; return; }
-  if plex "/library/sections/$key/refresh" -G --data-urlencode "path=$p" > /dev/null; then
+scan() {  # server, source path
+  name=$(title "$1")
+  p=$(server_path "$1" "$2")
+  [ -n "$p" ] || { log "$name: no path-map entry covers ${2#/sources/} - skipped"; return 0; }
+  if [ "$1" = plex ]; then
+    # Compare with / separators; Windows paths also ignore upper/lower case
+    key=$(jq -r --arg p "$p" '
+      ($p | test("^[A-Za-z]:|\\\\")) as $win
+      | def norm: (if $win then ascii_downcase else . end) | gsub("\\\\"; "/") | sub("/+$"; "") + "/";
+      ($p | norm) as $want
+      | [.MediaContainer.Directory[] | .key as $k | .Location[] | {k: $k, l: (.path | norm)}
+         | select(.l as $l | $want | startswith($l))] | sort_by(.l | length) | last | .k // empty' "$dir/sections")
+    [ -n "$key" ] || { log "Plex: no library contains $p - skipped"; return 0; }
+    plex "/library/sections/$key/refresh" -G --data-urlencode "path=$p" > /dev/null || { log "Plex: scan request failed for $p"; return 1; }
     log "asked Plex to scan $p (library $key)"
-    printf '%s\tPlex scan\t%s\n' "$(date +%s)" "$p" >> /state/events.log
   else
-    log "Plex scan request failed for $p"
+    updated "$1" "$p" > /dev/null || { log "$name: request failed for $p"; return 1; }
+    log "told $name that $p changed"
   fi
+  printf '%s\t%s scan\t%s\n' "$(date +%s)" "$name" "$p" >> /state/events.log
 }
 
-log "watching the source folders every ${POLL}s (depth $DEPTH), Plex at $PLEX_URL"
+log "watching the source folders every ${POLL}s (depth $DEPTH) for:$(for s in $servers; do printf ' %s at %s;' "$(title "$s")" "$(url_of "$s")"; done)"
 extra_roots > "$dir/roots"
 snapshot > "$dir/prev"
-: > "$dir/pending"
+for s in $servers; do : > "$dir/pending.$s"; echo 0 > "$dir/tries.$s"; done
 while sleep "$POLL"; do
   # A folder was added or removed through folders.conf: start again from what is there
   # now, or everything inside a new folder would look like a change and be scanned.
@@ -128,16 +172,34 @@ while sleep "$POLL"; do
   mv "$dir/cur" "$dir/prev"
 
   if [ -s "$dir/changed" ]; then
-    sort -u "$dir/changed" "$dir/pending" > "$dir/tmp" && mv "$dir/tmp" "$dir/pending"
+    for s in $servers; do
+      sort -u "$dir/changed" "$dir/pending.$s" > "$dir/tmp" && mv "$dir/tmp" "$dir/pending.$s"
+    done
     continue            # still changing - wait for a quiet poll
   fi
-  [ -s "$dir/pending" ] || continue
+  cat "$dir"/pending.* 2>/dev/null | grep -q . || continue
 
   sleep "$SETTLE"
-  plex "/library/sections" > "$dir/sections" || { log "cannot reach Plex at $PLEX_URL - will retry"; continue; }
-  # scan the deepest folders only: drop any folder that contains another changed one
-  while IFS= read -r path; do
-    grep -qF "$path/" "$dir/pending" || scan "$path"
-  done < "$dir/pending"
-  : > "$dir/pending"
+  # Each server has its own list, so one that is switched off keeps its list and is
+  # told when it is back, without the others being told twice.
+  for s in $servers; do
+    [ -s "$dir/pending.$s" ] || continue
+    if [ "$s" = plex ]; then
+      plex "/library/sections" > "$dir/sections" || { log "cannot reach Plex at $(url_of plex) - will retry"; continue; }   # for as long as it takes
+    fi
+    failed=0
+    # scan the deepest folders only: drop any folder that contains another changed one
+    while IFS= read -r path; do
+      grep -qF "$path/" "$dir/pending.$s" || scan "$s" "$path" < /dev/null || failed=1
+    done < "$dir/pending.$s"
+    # a failure is retried at the next quiet poll, five times at most
+    tries=$(( $(cat "$dir/tries.$s") + 1 ))
+    if [ "$failed" = 1 ] && [ "$tries" -lt 5 ]; then
+      echo "$tries" > "$dir/tries.$s"
+      log "$(title "$s") could not be told about everything - will retry"
+    else
+      [ "$failed" = 1 ] && log "$(title "$s") still refuses after $tries tries - giving up on these folders"
+      : > "$dir/pending.$s"; echo 0 > "$dir/tries.$s"
+    fi
+  done
 done

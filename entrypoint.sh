@@ -5,8 +5,9 @@
 #   2. Builds the login list (.env login + config/users.htpasswd).
 #   3. Works out which files to hide (HIDE) and sets up HTTPS (unless TLS=0).
 #   4. Starts the helpers in the background: status-server (:8081, the status page),
-#      monitor (health, auto-restart, update check, scheduled health report)
-#      and, if configured, plex-refresh.
+#      monitor (health, auto-restart, update check, scheduled health report),
+#      activity (what is being read right now, for the status page)
+#      and media-refresh (tells Plex, Jellyfin or Emby about new files, if set up).
 #   5. Serves /view read-only over WebDAV as the main process, behind HAProxy
 #      (:8080), which handles HTTPS and slows down password guessing.
 # The helpers live in scripts/ (installed to /usr/local/bin).
@@ -69,11 +70,12 @@ mkdir -p /state/www
 status-page 2>/dev/null || true
 status-server &
 monitor &
+# what is being read right now, and by whom (HAProxy reports each request to it, below)
+( while :; do activity; sleep 5; done ) &
 
-# ---- optional: tell Plex to scan folders as soon as they change ----
-if [ -n "$PLEX_URL" ] && [ -n "$PLEX_TOKEN" ]; then
-  /usr/local/bin/plex-refresh &
-fi
+# ---- optional: tell Plex, Jellyfin or Emby to scan folders as soon as they change ----
+# (media-refresh exits straight away if none of them is set up)
+media-refresh &
 
 # ---- optional: a second view where over-long paths are shortened (for Windows) ----
 # Served by its own rclone (127.0.0.1:8078), behind the same HAProxy as the normal drive.
@@ -106,6 +108,7 @@ fi
 cat > /tmp/haproxy.cfg <<HAPROXY
 global
     maxconn 512
+    log /tmp/activity.sock len 2048 local0
 defaults
     mode http
     timeout connect 5s
@@ -122,6 +125,11 @@ frontend drive
     $short_bind
     acl has_auth req.hdr(Authorization) -m found
     http-request set-var(txn.auth) req.hdr(Authorization),sha2(256),hex if has_auth
+    # for the "in use now" list: the user name only - the password stays here
+    http-request set-var(txn.user) "req.hdr(Authorization),regsub(^[Bb]asic +,),b64dec,regsub(:.*,)" if has_auth
+    log global
+    option logasap
+    log-format "RQ|%ci|%fp|%[var(txn.user)]|%HM|%HP"
     http-request track-sc0 str(all) table st_bad
     http-request track-sc1 var(txn.auth) table st_good if has_auth
     acl known_good sc1_get_gpc0 gt 0

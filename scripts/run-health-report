@@ -31,9 +31,16 @@ status-page 2>/dev/null     # show "running" on the page straight away
 
 if [ -z "$folder" ]; then
   # a full report: remember when, and work out which problems are new
-  grep '^  ' /state/report.tmp | sort > /state/report.problems.new
+  grep '^  ' /state/report.tmp | LC_ALL=C sort > /state/report.problems.new
   new=$(LC_ALL=C comm -13 /state/report.problems /state/report.problems.new 2>/dev/null || cat /state/report.problems.new)
   mv /state/report.problems.new /state/report.problems
+  # Problems marked "ignore" on the status page: never announce them, and forget the
+  # ones that have gone away (so one that comes back later is reported again).
+  if [ -s /state/report.ignored ]; then
+    new=$(printf '%s\n' "$new" | grep -vxFf /state/report.ignored)
+    grep -xFf /state/report.problems /state/report.ignored > /state/report.ignored.tmp
+    mv /state/report.ignored.tmp /state/report.ignored
+  fi
   date +%s > /state/report.full
   if [ "$notify_new" = 1 ] && [ -n "$new" ]; then
     notify "Health report: $(printf '%s\n' "$new" | wc -l) new problem(s)" "$(printf '%s\n' "$new" | head -10 | sed 's/^  //')

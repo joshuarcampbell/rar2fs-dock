@@ -57,6 +57,34 @@ for name in $folders; do
 done
 echo '</table></section>'
 
+# what is being read right now (from `activity`, which rewrites the file every 2 seconds)
+echo '<section><h2>In use now</h2>'
+act=/tmp/activity.json
+if [ -s "$act" ] && [ $(( $(date +%s) - $(jq -r '.updated // 0' "$act" 2>/dev/null || echo 0) )) -lt 30 ]; then
+  jq -r '
+    def speed: if . >= 1048576 then "\((. / 104857.6 | round) / 10) MB/s"
+               elif . >= 1024 then "\(. / 1024 | round) KB/s"
+               elif . > 0 then "\(.) B/s" else "-" end;
+    def who: ((.users | join(", ")) | @html) + " <span class=\"dim\">" + ((.clients | join(", ")) | @html) + "</span>";
+    (if (.reading | length) == 0 then "<p class=\"none\">Nothing is being read right now.</p>"
+     else
+       "<table><tr><th>File</th><th>Who</th><th style=\"text-align:right\">Progress</th><th style=\"text-align:right\">Speed</th></tr>",
+       (.reading[] | "<tr><td>\(.path | @html)\(if .short_names then " <span class=\"dim\">(short-names view)</span>" else "" end)</td>"
+          + "<td>\(who)</td><td class=\"n\">\(if .percent == null then "-" else "\(.percent)%" end)</td>"
+          + "<td class=\"n\">\(.bytes_per_second | speed)</td></tr>"),
+       "</table>"
+     end),
+    (if (.browsing | length) > 0 then
+       "<p class=\"sub\" style=\"margin:10px 0 0\">Browsing or scanning: "
+       + (.browsing | map("\(.user | @html) <span class=\"dim\">\(.client | @html)</span> - \(.listings_last_minute) folder listings in the last minute") | join("; "))
+       + "</p>"
+     else empty end)
+  ' "$act"
+else
+  echo '<p class="none">Not available yet.</p>'
+fi
+echo '</section>'
+
 # what `doctor` found: problems first, then one line for everything that passed
 doctor > /state/doctor.tsv.$$.tmp 2>/dev/null && mv /state/doctor.tsv.$$.tmp /state/doctor.tsv
 echo '<section><h2>Setup check</h2>'
@@ -94,9 +122,11 @@ if [ -f /state/report.running ]; then
 fi
 if [ -f /state/www/health-report.txt ]; then
   scope=$(sed -n '1s/^Health report for: //p' /state/www/health-report.txt)
-  echo "<p>Last report: <b>$(printf '%s' "${scope:-everything}" | esc)</b>, finished $(when "$(stat -c %Y /state/www/health-report.txt)") · <a href=\"health-report.txt\">full report</a></p><table>"
-  grep '^== ' /state/www/health-report.txt | sed 's/^== //' | while IFS= read -r line; do
-    printf '<tr><td>%s</td><td class="n">%s</td></tr>\n' "$(printf '%s' "${line%:*}" | esc)" "${line##*: }"
+  echo "<p>Last report: <b>$(printf '%s' "${scope:-everything}" | esc)</b>, finished $(when "$(stat -c %Y /state/www/health-report.txt)") · <a href=\"problems\">review the problems</a> · <a href=\"health-report.txt\">full report</a></p><table>"
+  # problems you marked "ignore" on the problems list are left out of the counts
+  report-counts | while IFS="$TAB" read -r kind shown ignored; do
+    printf '<tr><td>%s</td><td class="n">%s%s</td></tr>\n' "$(printf '%s' "$kind" | esc)" "$shown" \
+      "$( [ "$ignored" -gt 0 ] && printf ' <span class="dim">(+%s ignored)</span>' "$ignored")"
   done
   echo '</table>'
 elif [ ! -f /state/report.running ]; then
@@ -127,21 +157,72 @@ if [ -s /state/events.log ]; then
     printf '<tr><td style="white-space:nowrap">%s</td><td>%s</td><td>%s</td></tr>\n' "$(when "$t")" "$(printf '%s' "$title" | esc)" "$(printf '%s' "$msg" | esc)"
   done
   echo '</table>'
-else echo '<p class="none">Nothing yet. Restarts, Plex scans, updates and report findings show up here.</p>'; fi
+else echo '<p class="none">Nothing yet. Restarts, media-server scans, updates and report findings show up here.</p>'; fi
 echo '</section>'
-
+# ---- settings: a summary, then every setting with its value and whether it was changed ----
+onoff() { [ "$1" = "$2" ] && echo on || echo off; }
+media_servers=$( { [ -n "$PLEX_URL" ] && [ -n "$PLEX_TOKEN" ] && printf 'Plex · %s\n' "$PLEX_URL"
+                   [ -n "$JELLYFIN_URL" ] && [ -n "$JELLYFIN_API_KEY" ] && printf 'Jellyfin · %s\n' "$JELLYFIN_URL"
+                   [ -n "$EMBY_URL" ] && [ -n "$EMBY_API_KEY" ] && printf 'Emby · %s\n' "$EMBY_URL"; } | esc | sed 's/$/<br>/')
 cat <<HTML
 <section><h2>Settings</h2><table>
-<tr><td>Plex refresh</td><td>$( [ -n "$PLEX_URL" ] && [ -n "$PLEX_TOKEN" ] && printf 'on · %s' "$(printf '%s' "$PLEX_URL" | esc)" || echo 'off (no PLEX_TOKEN)')</td></tr>
+<tr><td>Instant refresh</td><td>${media_servers:-off (no media server set up)}</td></tr>
 <tr><td>Heartbeat</td><td>$( [ -n "$HEARTBEAT_URL" ] && echo on || echo 'off (no HEARTBEAT_URL)')</td></tr>
 <tr><td>Notifications</td><td>$( [ -n "$NOTIFY_URL" ] && echo on || echo 'off (no NOTIFY_URL)')</td></tr>
-<tr><td>Automatic restart</td><td>$( [ "${AUTO_RESTART:-1}" = 1 ] && echo on || echo off)</td></tr>
-<tr><td>Archives inside archives</td><td>$( [ "${NESTED_RAR:-1}" = 1 ] && echo on || echo off)</td></tr>
+<tr><td>Automatic restart</td><td>$(onoff "${AUTO_RESTART:-1}" 1)</td></tr>
+<tr><td>Archives inside archives</td><td>$(onoff "${NESTED_RAR:-1}" 1)</td></tr>
+<tr><td>Archive passwords</td><td>$( [ -s /tmp/rarconfig ] && echo "$(grep -c '^\[' /tmp/rarconfig) archive(s) have one" || echo 'none (no config/passwords.conf)')</td></tr>
 <tr><td>Short names view</td><td>$( [ "${SHORT_PATHS:-0}" = 1 ] && echo "on · port 8767 · paths up to ${MAX_PATH:-230} characters" || echo off)</td></tr>
-<tr><td>HTTPS</td><td>$( [ "${TLS:-1}" = 1 ] && echo on || echo off)</td></tr>
+<tr><td>HTTPS</td><td>$(onoff "${TLS:-1}" 1)</td></tr>
 <tr><td>Logins</td><td>$(cut -d: -f1 /tmp/htpasswd 2>/dev/null | esc | tr '\n' ' ')</td></tr>
-<tr><td>Hidden</td><td><code>$(printf '%s' "${HIDE-default}" | esc)</code></td></tr>
-</table></section>
+</table>
+<h2 style="margin-top:16px">Every setting</h2>
+<p class="sub" style="margin:0 0 10px">All of these are set in <code>.env</code>, followed by <code>docker compose up -d</code>. Passwords, tokens and addresses that contain one are not shown.</p>
+<table><tr><th>Setting</th><th>Value now</th><th></th><th>What it does</th></tr>
+HTML
+# name, value now, default, what it does
+setting() {
+  if [ "$2" = "$3" ]; then state='<span class="dim">default</span>'; else state='<b>changed</b>'; fi
+  printf '<tr><td><code>%s</code></td><td><code>%s</code></td><td>%s</td><td class="dim">%s</td></tr>\n' \
+    "$1" "$(printf '%s' "${2:-(empty)}" | esc)" "$state" "$4"
+}
+hidden() { [ -n "$1" ] && echo '(set - hidden)'; }      # for values that are secrets
+default_hide='*.sfv;Thumbs.db;desktop.ini;.DS_Store;@Recycle/**;.qsyncclient/**;Sample/**;Proof/**'
+setting TLS                   "${TLS:-1}"                     1          'HTTPS for the drive and this page; 0 = plain HTTP'
+setting TLS_HOSTS             "$TLS_HOSTS"                    ''         'Addresses or names other devices use for this PC (they go in the certificate)'
+setting SHORT_PATHS           "${SHORT_PATHS:-0}"             0          'A second view on port 8767 with names shortened to fit Windows'
+setting MAX_PATH              "${MAX_PATH:-230}"              230        'Longest path allowed in the short-names view'
+setting NESTED_RAR            "${NESTED_RAR:-1}"              1          'Open archives inside archives (subtitle packs)'
+setting HIDE                  "$HIDE"                         "$default_hide" 'Files and folders left out of the drive, ;-separated'
+setting RAR2FS_OPTS           "$RAR2FS_OPTS"                  '--seek-length=1 -o warmup' 'Options passed to rar2fs'
+setting DIR_CACHE_TIME        "${DIR_CACHE_TIME:-15s}"        15s        'How long the drive remembers a folder listing'
+setting RCLONE_OPTS           "$RCLONE_OPTS"                  ''         'Extra options for the WebDAV server'
+setting LOGIN_GUESS_LIMIT     "${LOGIN_GUESS_LIMIT:-5}"       5          'Wrong logins allowed in 10 seconds before new logins are refused'
+setting AUTO_RESTART          "${AUTO_RESTART:-1}"            1          'Restart after three failed health checks'
+setting HEALTH_REPORT_DAYS    "${HEALTH_REPORT_DAYS:-7}"      7          'Days between scheduled health reports; 0 = never'
+setting LIBRARY_INDEX_MINUTES "${LIBRARY_INDEX_MINUTES:-10}"  10         'Minutes between rebuilds of the search and duplicates index'
+setting NOTIFY_URL            "$(hidden "$NOTIFY_URL")"       ''         'Where alerts are sent'
+setting HEARTBEAT_URL         "$(hidden "$HEARTBEAT_URL")"    ''         'A URL pinged every minute while healthy'
+setting STATUS_TOKEN          "$(hidden "$STATUS_TOKEN")"     ''         'Read-only token for status.json, /metrics and the RSS feed'
+setting PLEX_URL              "$PLEX_URL"                     ''         'Plex: where it answers'
+setting PLEX_TOKEN            "$(hidden "$PLEX_TOKEN")"       ''         'Plex: its token'
+setting PLEX_PATH_MAP         "$PLEX_PATH_MAP"                ''         'Plex: where each folder is on the Plex machine'
+setting PLEX_SHORT_NAMES      "${PLEX_SHORT_NAMES:-auto}"     auto       'Plex: whether it sees the shortened names'
+setting JELLYFIN_URL          "$JELLYFIN_URL"                 ''         'Jellyfin: where it answers'
+setting JELLYFIN_API_KEY      "$(hidden "$JELLYFIN_API_KEY")" ''         'Jellyfin: an API key'
+setting JELLYFIN_PATH_MAP     "$JELLYFIN_PATH_MAP"            ''         'Jellyfin: where each folder is on that machine'
+setting JELLYFIN_SHORT_NAMES  "${JELLYFIN_SHORT_NAMES:-auto}" auto       'Jellyfin: whether it sees the shortened names'
+setting EMBY_URL              "$EMBY_URL"                     ''         'Emby: where it answers'
+setting EMBY_API_KEY          "$(hidden "$EMBY_API_KEY")"     ''         'Emby: an API key'
+setting EMBY_PATH_MAP         "$EMBY_PATH_MAP"                ''         'Emby: where each folder is on that machine'
+setting EMBY_SHORT_NAMES      "${EMBY_SHORT_NAMES:-auto}"     auto       'Emby: whether it sees the shortened names'
+setting PLEX_POLL_SECONDS     "${PLEX_POLL_SECONDS:-60}"      60         'Media servers: seconds between looks for changes'
+setting PLEX_SETTLE_SECONDS   "${PLEX_SETTLE_SECONDS:-90}"    90         'Media servers: seconds to wait after the last change'
+setting PLEX_WATCH_DEPTH      "${PLEX_WATCH_DEPTH:-4}"        4          'Media servers: how many folder levels are watched'
+cat <<HTML
+</table>
+<p class="sub" style="margin:10px 0 0">Not visible from inside the container, so not listed: <code>WEBDAV_USER</code> / <code>WEBDAV_PASS</code> (see Logins above), <code>BIND</code>, <code>NAS_USER</code> / <code>NAS_PASS</code> and <code>APPARMOR_PROFILE</code>. Your folders are in <code>docker-compose.override.yml</code>.</p>
+</section>
 </main>
 <script>
 $(cat /usr/local/bin/page.js)

@@ -389,7 +389,7 @@ Things to know:
 - **New files appear at Plex's next scan.** Plex can't detect changes on this drive
   by itself. Either use *Scan Library Files* / Settings → Library → *Scan my library
   periodically*, or let the container tell Plex the moment something changes - see
-  [Telling Plex about new files straight away](#telling-plex-about-new-files-straight-away).
+  [Telling Plex about new files straight away](#telling-your-media-server-about-new-files).
 - **Video inside RARs is new to Plex.** Files Plex already knew keep their metadata;
   video it couldn't read before is added as new items.
 
@@ -413,7 +413,7 @@ It asks for the Plex PC's IP address or name, then:
    <https://plex.tv/link> while signed in to your Plex account. With the token it turns
    off Plex's *Empty trash automatically after every scan* and writes `PLEX_URL`,
    `PLEX_TOKEN` and `PLEX_PATH_MAP` to `.env`, so Plex is told about new files
-   [straight away](#telling-plex-about-new-files-straight-away). You can paste a token
+   [straight away](#telling-your-media-server-about-new-files). You can paste a token
    instead, or skip this part.
 4. **Restarts the container** once with the new settings.
 5. **Copies a ready-made folder to the Plex PC** and tells you where it put it. The
@@ -669,6 +669,18 @@ Windows, so set the PC to log in automatically, or keep it logged in.
 
 ### Troubleshooting on Linux
 
+Start with the check script. From the repo's `linux/` folder on the Linux server:
+
+```bash
+sudo sh doctor.sh
+```
+
+It changes nothing. It checks rclone and FUSE, the saved address and login, whether
+the server answers and its certificate still matches, and every mount: enabled,
+running, really mounted, not empty, and not also listed in `/etc/fstab`. If Plex runs
+on that machine it also checks Plex's trash setting and that a library uses each
+mount. Each line is `ok`, `CHECK` or `PROBLEM`, with the command that fixes it.
+
 | Problem | Fix |
 |---|---|
 | `systemctl status` shows `401` or `Unauthorized` | Wrong user/password in `common.conf`. The password must be the `rclone obscure` output, not the plain password. |
@@ -685,7 +697,7 @@ Windows, so set the PC to log in automatically, or keep it logged in.
 | To... | Run |
 |---|---|
 | Add or remove a source | Edit `docker-compose.override.yml`, then `docker compose up -d` |
-| Change a setting | Edit `.env` or `docker-compose.yml` (see [Settings](#settings)), then `docker compose up -d` |
+| Change a setting | Edit `.env` (see [Settings](#settings)), then `docker compose up -d` |
 | See what it's doing | Open <https://localhost:8766/status.html> |
 | Check your folders for problems | The **Run health report** button on that page |
 | See container logs | `docker logs rar2fs` |
@@ -697,6 +709,8 @@ Windows, so set the PC to log in automatically, or keep it logged in.
 | Update to a newer version | `.\windows\update.ps1` - see [Updating](#updating) |
 | Connect Plex on another Windows PC | `.\windows\connect-plex.ps1` - see [Plex on another Windows PC](#plex-on-another-windows-pc) |
 | Find out why something isn't working | `.\windows\doctor.ps1` - see [Setup check](#setup-check) |
+| See whether anyone is watching right now | `.\windows\in-use.ps1`, or *In use now* on the status page - see [What's in use](#whats-in-use-and-restart-warnings) |
+| Give an encrypted archive its password | `config\passwords.conf` - see [Password-protected archives](#password-protected-archives) |
 | Save your setup, or move it to another PC | `.\windows\backup.ps1` - see [Backup and restore](#backup-and-restore) |
 | See at a glance whether it's healthy | The [tray icon](#tray-icon) |
 
@@ -721,10 +735,12 @@ enable Docker Desktop → Settings → General → *Start Docker Desktop when yo
 <https://localhost:8766/status.html> (or `https://<this-PC's-IP>:8766/status.html` from
 another device), with the same login as the drive. Your browser will warn about the
 self-signed certificate the first time; accept it once. It shows each folder, where it
-comes from and whether it's mounted or has stopped, the result of the
+comes from and whether it's mounted or has stopped,
+[what is being read right now](#whats-in-use-and-restart-warnings), the result of the
 [setup check](#setup-check), [what's on the drive](#the-library-search-recently-added-duplicates-sizes),
 the unrar/rar2fs versions and whether newer ones exist, the last health report, recent
-events (restarts, Plex scans, alerts) and the current settings.
+events (restarts, media-server scans, alerts) and [every setting](#settings) with its
+current value.
 
 The page is live: while you have it open it updates itself every few seconds, without
 reloading, so a folder that stops or a report that finishes shows up straight away. A
@@ -736,6 +752,36 @@ The **Run health report** button starts a [health report](#health-report) withou
 opening a terminal. Choose *Everything* or a single folder first - one folder is much
 quicker. The page shows *running* while it works and updates by itself when the result
 is in. Only one report runs at a time.
+
+### What's in use, and restart warnings
+
+**In use now** on the status page lists every file being read from the drive at this
+moment: which file, which login, how far through it is and how fast it's being read.
+Under it, *Browsing or scanning* shows who is listing folders and how busily - a media
+server in the middle of a library scan shows up there with hundreds of listings a
+minute. Together they answer "is someone watching, or is Plex just scanning?".
+
+The same list protects you from cutting off a film. Before anything restarts the
+container - `update.ps1`, `add-user.ps1`, `connect-plex.ps1`, making a drive visible
+in `add-folder.ps1`, or *Restart container* on the tray icon - it checks, shows who is
+reading what, and asks first. To look yourself:
+
+```powershell
+.\windows\in-use.ps1
+```
+
+Things to know:
+
+- **Give each device its own login** ([More logins](#more-logins)) and the list says
+  who is who. On Docker Desktop every device can appear to come from the same
+  address, so the login is what tells them apart.
+- **Progress runs a little ahead** of what has actually been watched, because the
+  drive reads ahead. On a small file it can show 100% almost at once.
+- **A restart you start by hand** (`docker compose restart`, `docker compose up -d`)
+  doesn't ask. Neither does the [automatic restart](#automatic-restart), which only
+  happens when the drive has already stopped working.
+- It's also in `status.json` (`reading_now`, `activity`) and as the
+  `rar2fs_dock_reading_now` metric.
 
 ### Setup check
 
@@ -773,8 +819,7 @@ the `rar2fs_dock_setup_problems` metric.
 If the [health check](#health-check) fails three times in a row, the container
 restarts itself, which remounts everything. If that happens three times within an hour
 it stops trying, so a problem a restart can't fix (an unplugged drive, say) doesn't
-turn into a restart loop. Set `AUTO_RESTART: "0"` in `docker-compose.yml` to turn it
-off.
+turn into a restart loop. Set `AUTO_RESTART=0` in `.env` to turn it off.
 
 The status page is looked after separately: if it stops answering, only its own small
 server is restarted, so the drive carries on undisturbed.
@@ -888,7 +933,7 @@ Folders added like this are listed in `config\folders.conf`, one per line
 
 A folder added this way is treated like any other: it's in the search, duplicates and
 sizes, the [health report](#health-report) and the setup check cover it, and
-[instant Plex refresh](#telling-plex-about-new-files-straight-away) watches it - give
+[instant Plex refresh](#telling-your-media-server-about-new-files) watches it - give
 it an entry in `PLEX_PATH_MAP` like the rest (`concerts=/mnt/media/concerts`).
 
 ### Tray icon
@@ -903,7 +948,8 @@ Desktop not running, usually). A notification pops up when the state changes.
 ```
 
 Right-click it for: the current state, *Open status page*, *Open drive*, *Remount
-drive* and *Restart container*. Double-click opens the status page. The menu follows
+drive* and *Restart container* (which asks first if something is being read).
+Double-click opens the status page. The menu follows
 Windows' light or dark app mode. The setup wizard
 offers to install it. Windows may tuck new icons behind the **^** arrow; drag it out
 next to the clock to keep it in view.
@@ -916,7 +962,9 @@ next to the clock to keep it in view.
 
 One command: it pulls the latest version, rebuilds and restarts the container, waits
 until it's healthy, remounts the drive if that's needed, and tells you if other
-devices need anything (new files for a Linux machine, or a new certificate).
+devices need anything (new files for a Linux machine, or a new certificate). If
+something is being read from the drive it says so and asks before going on; `-Force`
+skips the question.
 
 If you're coming from a version that kept your folders in `docker-compose.yml`, it
 first moves them into `docker-compose.override.yml` - your network shares too - so
@@ -1045,10 +1093,11 @@ sensor:
 
 Fields in `status.json`: `health` (`healthy`, `unhealthy` or `starting`), `healthy`
 (true/false), `detail` (which check failed), `folders_total`, `folders_mounted`,
-`updates_available`, `setup_problems`, `report_problems`, `restarts_last_hour`,
+`updates_available`, `reading_now`, `setup_problems`, `report_problems` (without the
+ones you [ignored](#health-report)), `restarts_last_hour`,
 `library_items`, `library_bytes`, `duplicates`, `started` and `generated` (times, in
-seconds since 1970), and the full lists under `folders`, `setup_check`, `versions`,
-`report`, `settings` and `events`.
+seconds since 1970), and the full lists under `folders`, `activity`, `setup_check`,
+`versions`, `report`, `settings` and `events`.
 
 ### Updates for unrar and rar2fs
 
@@ -1148,7 +1197,7 @@ Put that in `.env`, then run `docker compose up -d`.
   certificate, login and guess-throttling as the normal drive. `connect-plex.ps1`
   picks this port by itself when `SHORT_PATHS=1`.
 
-The limit is `MAX_PATH` in `docker-compose.yml`: 230 characters, counted from the
+The limit is `MAX_PATH` in `.env`: 230 characters by default, counted from the
 drive's root, which leaves room for the drive letter or a network name in front.
 Lower it if programs still complain. Reading through this view is as fast as the normal one.
 
@@ -1166,14 +1215,23 @@ docker exec rar2fs health-report tv/tv-1      # one folder
 You can also start it from the **Run health report** button on the
 [status page](#status-page).
 
-A full report also runs by itself every `HEALTH_REPORT_DAYS` days (7 by default; `"0"`
-in `docker-compose.yml` turns that off), starting about an hour after the container is
+A full report also runs by itself every `HEALTH_REPORT_DAYS` days (7 by default;
+`HEALTH_REPORT_DAYS=0` in `.env` turns that off), starting about an hour after the container is
 first created. A full report you start yourself counts, so the schedule runs from the
 most recent one. The latest result is on the status page, and new problems found by a
 scheduled report are sent as a notification if you've set that up.
 
 A set that is only missing its *last* parts can't be spotted from file names, so it
 won't be listed.
+
+**Reviewing and ignoring problems.** *Review the problems* on the status page opens a
+list of everything the last report found, grouped by kind and by folder. Each line has
+an **Ignore** button for the ones you know about and don't intend to fix - a sample
+folder that is meant to be empty, an archive you don't have the password for. An
+ignored problem is no longer counted on the status page, in `status.json` or in the
+metrics, and is never sent as a notification. *Stop ignoring* at the bottom of the list
+undoes it. If an ignored problem gets fixed it is forgotten, so it is reported afresh
+should it ever come back.
 
 ### Health check
 
@@ -1186,17 +1244,17 @@ and the status page shows which check failed and marks that folder *stopped*. Se
 ### Archives inside archives (subtitles)
 
 Scene releases often pack subtitles as a RAR inside a RAR
-(`Subs/x.subs.rar` → `x.idx` + `x.rar` → `x.sub`). With `NESTED_RAR: "1"` (the default)
+(`Subs/x.subs.rar` → `x.idx` + `x.rar` → `x.sub`). With `NESTED_RAR=1` (the default)
 both levels are opened, so `Subs/` shows the `.idx` and `.sub` files. It costs roughly
-15% of read speed; set it to `"0"` in `docker-compose.yml` to turn it off.
+15% of read speed; set `NESTED_RAR=0` in `.env` to turn it off.
 
 ### Hiding clutter
 
-`HIDE` in `docker-compose.yml` is a `;`-separated list of files and folders to leave
-out of the drive. By default it hides `.sfv` files, `Sample` and `Proof` folders,
+`HIDE` in `.env` is a `;`-separated list of files and folders to leave out of the
+drive. By default it hides `.sfv` files, `Sample` and `Proof` folders,
 Windows/Mac thumbnail files and NAS recycle bins. Names match in any folder and ignore
 upper/lower case; `Sample/**` means "a folder called Sample and everything in it".
-Set `HIDE: ""` to show everything.
+Put `HIDE=` (with nothing after it) in `.env` to show everything.
 
 ### More logins
 
@@ -1209,11 +1267,15 @@ The login in `.env` always works. To give another person or device its own login
 Logins are stored (hashed) in `config\users.htpasswd`, which is gitignored. To revoke
 one, delete its line and run `docker compose restart`.
 
-### Telling Plex about new files straight away
+### Telling your media server about new files
 
-Plex can't detect changes on a network mount by itself, so new files normally wait for
-its next scheduled scan. Set these in `.env` and the container will watch your source
-folders and ask Plex to scan just the folder that changed:
+A media server can't detect changes on a network mount by itself, so new files normally
+wait for its next scheduled scan. Set this up in `.env` and the container will watch
+your source folders and tell the server to scan just the folder that changed. It works
+with **Plex**, **Jellyfin** and **Emby** - any one, or several at once.
+
+Each needs three things: where it answers, a token or key, and where each of your
+folders is on that machine.
 
 **Plex on Linux** (another machine):
 
@@ -1231,61 +1293,130 @@ PLEX_TOKEN=xxxxxxxxxxxxxxxxxxxx
 PLEX_PATH_MAP=tv=Y:\tv;films=Y:\films
 ```
 
+**Jellyfin:**
+
+```ini
+JELLYFIN_URL=http://192.168.1.20:8096
+JELLYFIN_API_KEY=xxxxxxxxxxxxxxxxxxxx
+JELLYFIN_PATH_MAP=tv=/mnt/media/tv;films=/mnt/media/films
+```
+
+**Emby:**
+
+```ini
+EMBY_URL=http://192.168.1.20:8096
+EMBY_API_KEY=xxxxxxxxxxxxxxxxxxxx
+EMBY_PATH_MAP=tv=/mnt/media/tv;films=/mnt/media/films
+```
+
 Then run `docker compose up -d`.
 
-- `PLEX_URL`: where Plex answers. `host.docker.internal` is how the container reaches
-  the PC it runs on; don't use `localhost` here.
-- `PLEX_TOKEN`: in Plex Web, open any item → **⋯** → *Get Info* → *View XML*. The
+- **The address** (`..._URL`): where the server answers. For a server on the same PC as
+  the container use `host.docker.internal`, not `localhost`.
+- **`PLEX_TOKEN`:** in Plex Web, open any item → **⋯** → *Get Info* → *View XML*. The
   token is the `X-Plex-Token=...` value at the end of the address bar.
-- `PLEX_PATH_MAP`: where each folder is mounted on the Plex server, as
-  `<folder on the drive>=<path on the Plex server>`, separated by `;`. Use the same
-  paths your Plex libraries use. **Don't put quotes around it** - inside quotes, `\t`
-  in `Y:\tv` is read as a tab. `Y:/tv` works too.
-- **With `SHORT_PATHS=1`,** Plex on Windows sees shortened folder names, and the
-  container asks for those automatically. If you mounted the drive with `-Original`,
-  add `PLEX_SHORT_NAMES=0` to `.env` so it asks for the full names instead.
+  (`connect-plex.ps1` fetches one for you.)
+- **`JELLYFIN_API_KEY`:** Jellyfin → *Dashboard* → *API Keys* → **+**.
+- **`EMBY_API_KEY`:** Emby → *Settings* → *API Keys* → *New API Key*.
+- **The path map** (`..._PATH_MAP`): where each folder is on that server, as
+  `<folder on the drive>=<path on the server>`, separated by `;`. Use the same paths
+  the server's libraries use. **Don't put quotes around it** - inside quotes, `\t` in
+  `Y:\tv` is read as a tab. `Y:/tv` works too.
+- **With `SHORT_PATHS=1`,** a server on Windows sees shortened folder names, and the
+  container asks for those automatically. If you mounted that drive with `-Original`,
+  add `PLEX_SHORT_NAMES=0` (or `JELLYFIN_SHORT_NAMES=0`, `EMBY_SHORT_NAMES=0`) to
+  `.env` so it asks for the full names instead.
 
 It checks once a minute and waits until a folder has stopped changing, so a new
-download reaches Plex about 2-3 minutes after it finishes. `docker logs rar2fs` shows
-a `plex-refresh:` line for every scan it requests. Leave `PLEX_TOKEN` empty to turn
-this off.
+download reaches the server about 2-3 minutes after it finishes. `docker logs rar2fs`
+shows a `media-refresh:` line for every request, and each one appears under *Recent
+events* on the status page. If a server is switched off, it is told when it's back.
+Leave a server's token or key empty to turn it off.
+
+Plex is asked to scan one folder of one library. Jellyfin and Emby are told "this path
+changed" and work out the library themselves. The Jellyfin and Emby support has been
+tested against stand-in servers that record what they are sent, not yet against real
+ones - `.\windows\doctor.ps1` checks that yours accepts the address and key.
+
+### Password-protected archives
+
+rar2fs can open encrypted archives if it is given the password. Put them in a file
+called `config\passwords.conf`, one per line:
+
+```
+# <archive file name> = <password>
+Secret.Film.rar = open-sesame
+Some.Show.S01*.rar = another password
+```
+
+- **The name is the archive's first file,** without its folder: `name.rar`, or
+  `name.part01.rar` for a set split that way.
+- **`*` stands for anything,** so one line can cover a whole season, or `*.rar` every
+  archive you have. Names with `*` are looked up when the container starts, which
+  takes a while on a very large library.
+- **Then restart:** `docker compose restart`. Passwords are read when the folders are
+  mounted.
+
+The status page shows how many archives have a password, and the
+[setup check](#setup-check) points out lines it couldn't use and names that match
+nothing. Archives whose password is missing or wrong stay listed in the
+[health report](#health-report) under *could not be opened*.
+
+The passwords are kept in plain text, in that file and in a copy inside the container
+that only the container's own user can read - rar2fs has no other way. The file is
+gitignored and is included in [backups](#backup-and-restore). An archive whose name
+contains `]` can't be given a password this way; put the password in a file next to
+it instead, with the same name and the extension `.pwd`, which rar2fs also reads.
 
 ## Settings
 
-Settings live in two files. After changing either, run `docker compose up -d`.
+Every setting lives in one file: `.env`. It is yours alone and never committed. Copy
+`.env.example` to start - it lists all of these with their defaults. After a change,
+run `docker compose up -d`.
 
-**In `.env`** - yours alone, never committed. Copy `.env.example` to start.
+The status page shows every setting with its current value and whether you changed
+it, under **Every setting** (passwords and tokens are hidden).
 
 | Setting | What it does | Default |
 |---|---|---|
 | `WEBDAV_USER`, `WEBDAV_PASS` | The login for the drive and the status page. Required. | - |
+| `NAS_USER`, `NAS_PASS` | Login for network shares, if you use any | - |
 | `TLS_HOSTS` | Addresses or names other devices use to reach this PC, for the [HTTPS](#https) certificate | this PC only |
 | `TLS` | `0` turns [HTTPS](#https) off | `1` (on) |
-| `SHORT_PATHS` | `1` turns on the [short-names view](#short-names-for-windows) | `0` (off) |
 | `BIND` | `127.0.0.1` lets [only this PC](#keeping-it-to-this-pc-only) connect | all of your network |
+| `LOGIN_GUESS_LIMIT` | Wrong logins allowed in 10 seconds before new logins are refused for a while | `5` |
+| `SHORT_PATHS` | `1` turns on the [short-names view](#short-names-for-windows) | `0` (off) |
+| `MAX_PATH` | Longest path in the short-names view | `230` |
+| `NESTED_RAR` | Open [archives inside archives](#archives-inside-archives-subtitles) | `1` (on) |
+| `HIDE` | Files and folders to [leave out of the drive](#hiding-clutter) | `.sfv`, samples, recycle bins... |
+| `PLEX_URL`, `PLEX_TOKEN`, `PLEX_PATH_MAP` | [Tell Plex about new files](#telling-your-media-server-about-new-files) | off |
+| `JELLYFIN_URL`, `JELLYFIN_API_KEY`, `JELLYFIN_PATH_MAP` | The same for Jellyfin | off |
+| `EMBY_URL`, `EMBY_API_KEY`, `EMBY_PATH_MAP` | The same for Emby | off |
+| `PLEX_SHORT_NAMES`, `JELLYFIN_SHORT_NAMES`, `EMBY_SHORT_NAMES` | Whether that server reads the short-names view: `auto`, `1` or `0` | `auto` |
+| `PLEX_POLL_SECONDS`, `PLEX_SETTLE_SECONDS`, `PLEX_WATCH_DEPTH` | Timing for all three media servers: how often to look, how long to wait after the last change, how many folder levels to watch | `60`, `90`, `4` |
 | `NOTIFY_URL` | Where to send [notifications](#notifications) | none |
 | `HEARTBEAT_URL` | A URL to ping every minute while healthy - see [Dashboards and monitoring](#dashboards-and-monitoring) | none |
-| `STATUS_TOKEN` | A read-only token for `status.json` and `/metrics` | none |
-| `PLEX_URL`, `PLEX_TOKEN`, `PLEX_PATH_MAP` | [Tell Plex about new files](#telling-plex-about-new-files-straight-away) | off |
-| `PLEX_SHORT_NAMES` | Whether Plex reads the short-names view: `auto`, `1` or `0` | `auto` |
-| `NAS_USER`, `NAS_PASS` | Login for network shares, if you use any | - |
+| `STATUS_TOKEN` | A read-only token for `status.json`, `/metrics` and the RSS feed | none |
+| `AUTO_RESTART` | [Restart](#automatic-restart) after three failed health checks | `1` (on) |
+| `HEALTH_REPORT_DAYS` | Days between scheduled [health reports](#health-report); `0` = never | `7` |
+| `LIBRARY_INDEX_MINUTES` | Minutes between rebuilds of the [library](#the-library-search-recently-added-duplicates-sizes) index | `10` |
+| `RAR2FS_OPTS` | Options passed to rar2fs. The defaults speed up large multi-part sets and pre-read archives at start-up. | `--seek-length=1 -o warmup` |
+| `DIR_CACHE_TIME` | How long the drive remembers a folder's listing before looking again | `15s` |
+| `RCLONE_OPTS` | Extra options for the WebDAV server, for the rare case you need one | none |
 | `APPARMOR_PROFILE` | Linux hosts only - see [Security](#security) | `unconfined` |
 
-**In `docker-compose.yml`**, under `environment:`
+Three things have files of their own, all gitignored:
 
-| Setting | What it does | Default |
-|---|---|---|
-| `HIDE` | Files and folders to [leave out of the drive](#hiding-clutter) | `.sfv`, samples, recycle bins... |
-| `NESTED_RAR` | Open [archives inside archives](#archives-inside-archives-subtitles) | `"1"` (on) |
-| `MAX_PATH` | Longest path in the short-names view | `"230"` |
-| `AUTO_RESTART` | [Restart](#automatic-restart) after three failed health checks | `"1"` (on) |
-| `HEALTH_REPORT_DAYS` | Days between scheduled [health reports](#health-report); `"0"` = never | `"7"` |
-| `LOGIN_GUESS_LIMIT` | Wrong logins allowed in 10 seconds before new logins are refused for a while | `"5"` |
-| `PLEX_POLL_SECONDS`, `PLEX_SETTLE_SECONDS`, `PLEX_WATCH_DEPTH` | Fine-tuning for the Plex refresh: how often to look, how long to wait after the last change, how many folder levels to watch | `"60"`, `"90"`, `"4"` |
-| `RAR2FS_OPTS` | Options passed to rar2fs. The defaults speed up large multi-part sets and pre-read archives at start-up. | `--seek-length=1 -o warmup` |
+- **Your folders:** `docker-compose.override.yml` - see
+  [Setup, step 1](#1-choose-your-source-folders).
+- **Extra logins:** `config\users.htpasswd` - see [More logins](#more-logins).
+- **Archive passwords:** `config\passwords.conf` - see
+  [Password-protected archives](#password-protected-archives).
 
-Your folders go in `docker-compose.override.yml` - see
-[Setup, step 1](#1-choose-your-source-folders).
+**Coming from an older version?** Some of these used to be set by editing
+`docker-compose.yml`. If you changed that file, `update.ps1` will stop and say so:
+move your values into `.env` (the names are the same), then run
+`git checkout -- docker-compose.yml` and update again.
 
 ## Keeping it to this PC only
 
@@ -1358,9 +1489,10 @@ the mistakes below by itself and says how to fix them.
   [Keeping it to this PC only](#keeping-it-to-this-pc-only).
 - **The status page uses the same logins** as the drive, on port 8766. It shows your
   folder names and source paths, so it's password-protected too. Wrong passwords are
-  slowed to about two guesses a second, its two actions (starting a health report or
-  a size scan) are only accepted from the page itself, and it can't be embedded in
-  another site.
+  slowed to about two guesses a second, its three actions (starting a health report,
+  starting a size scan, ignoring a problem) are only accepted from the page itself,
+  and it can't be embedded in another site. Anyone with a login can see who is reading
+  what under *In use now*; if that matters, keep the logins to people you'd tell anyway.
 - **The status token is read-only.** If you set `STATUS_TOKEN`, it can fetch
   `status.json`, `/metrics` and the RSS feed and nothing else: not the page, not the
   report, and it can't start anything. It travels in the address, so treat it like a password and
@@ -1371,9 +1503,10 @@ the mistakes below by itself and says how to fix them.
   already connected never notice and nobody can be locked out. Still use a long,
   random password: `change-me` in `.env.example` is only a placeholder.
 - **Where the secrets are.** `.env` holds the drive's password in plain text, plus the
-  NAS login and the Plex token if you use them. Extra logins in
-  `config\users.htpasswd` are stored only as hashes, and `tls\key.pem` is the
-  certificate's private key. All three are gitignored and are left out of the image
+  NAS login and any media-server token or key you use. `config\passwords.conf` holds
+  archive passwords in plain text. Extra logins in `config\users.htpasswd` are stored
+  only as hashes, and `tls\key.pem` is the certificate's private key. All of these are
+  gitignored and are left out of the image
   when it is built (`.dockerignore`), but anyone who can read this folder can read
   them - as can anyone who gets hold of a [backup](#backup-and-restore) zip.
 - **A Plex token is powerful.** The one `connect-plex.ps1` fetches (or you paste) is

@@ -1,0 +1,15 @@
+#!/bin/sh
+# Counts the problems in the last health report, per kind, leaving out the ones you
+# marked "ignore" on the status page's problems list (/state/report.ignored).
+#
+#   <kind of problem><TAB><how many count><TAB><how many are ignored>
+#
+# Used by status-page and status-data, so the page, status.json and /metrics agree.
+report=/state/www/health-report.txt
+[ -f "$report" ] || exit 0
+awk -v ignored=/state/report.ignored '
+  BEGIN { while ((getline line < ignored) > 0) skip[line] = 1 }
+  function flush() { if (title != "") printf "%s\t%d\t%d\n", title, shown, hidden }
+  /^== / { flush(); title = $0; sub(/^== /, "", title); sub(/: [0-9]+$/, "", title); shown = 0; hidden = 0; next }
+  title != "" && /^  / { if ($0 in skip) hidden++; else shown++ }
+  END { flush() }' "$report"

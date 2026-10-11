@@ -165,3 +165,5 @@ done
 say ""
 say "For Plex: turn OFF Settings > Library > 'Empty trash automatically after every scan',"
 say "then add these paths to your libraries and scan."
+say ""
+say "If something stops working later, run:  sudo sh doctor.sh"

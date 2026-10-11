@@ -9,6 +9,10 @@
   GET  /search?q=...                          looks through the library index
   POST /run-report  (form field: folder)      starts `run-health-report [folder]`
   POST /run-scan                              starts `library-scan` (sizes)
+  GET  /problems                              the last health report's findings, each
+                                              with an "ignore" button
+  POST /ignore  (fields: line, action)        marks one finding as ignored, or stops
+                                              ignoring it (/state/report.ignored)
 
 Every request needs a login from the same list as the drive (/tmp/htpasswd). The one
 exception: if STATUS_TOKEN is set, /status.json, /metrics and /recent.xml also accept
@@ -33,6 +37,9 @@ WWW = '/state/www'
 HTPASSWD = '/tmp/htpasswd'
 VIEW = '/view'
 RUNNING = '/state/report.running'
+REPORT = '/state/www/health-report.txt'
+IGNORED = '/state/report.ignored'       # one finding per line, exactly as the report prints it
+_ignore_lock = threading.Lock()
 STATUS_TOKEN = os.environ.get('STATUS_TOKEN', '')
 TOKEN_PATHS = ('/status.json', '/metrics', '/recent.xml')      # all a token can read
 ITEMS = '/state/library/items.tsv'
@@ -117,6 +124,34 @@ def refresh_page():
                 pass
 
 
+def read_report():
+    """([(kind of problem, [finding, ...]), ...], what was checked) from the last report.
+
+    A finding is a whole line of the report, leading spaces included - the same text
+    report-counts and run-health-report compare against the ignore list."""
+    sections, scope = [], ''
+    try:
+        with open(REPORT, encoding='utf-8', errors='surrogateescape') as f:
+            for line in f.read().split('\n'):
+                if line.startswith('Health report for: '):
+                    scope = line[len('Health report for: '):]
+                elif line.startswith('== '):
+                    sections.append((re.sub(r': \d+$', '', line[3:]), []))
+                elif line.startswith('  ') and sections:
+                    sections[-1][1].append(line)
+    except OSError:
+        pass
+    return sections, scope
+
+
+def read_ignored():
+    try:
+        with open(IGNORED, encoding='utf-8', errors='surrogateescape') as f:
+            return {line for line in f.read().split('\n') if line}
+    except OSError:
+        return set()
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = 'rar2fs-dock'
     sys_version = ''        # don't announce the Python version
@@ -163,6 +198,8 @@ class Handler(BaseHTTPRequestHandler):
         path = url.path
         if path in ('', '/'):
             return self._send(302, headers=[('Location', 'status.html')])
+        if path == '/problems':
+            return self._problems()
         if path == '/search':
             return self._search(urllib.parse.parse_qs(url.query).get('q', [''])[0])
         if path == '/metrics':
@@ -238,7 +275,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authorised():
             return
         action = urllib.parse.urlparse(self.path).path
-        if action not in ('/run-report', '/run-scan'):
+        if action not in ('/run-report', '/run-scan', '/ignore'):
             return self._send(404, b'Not found\n')
         # The browser sends the login by itself, so make sure the request was made
         # from this page and not by some other site the user happens to have open.
@@ -246,12 +283,14 @@ class Handler(BaseHTTPRequestHandler):
         if urllib.parse.urlparse(origin).netloc != self.headers.get('Host', ''):
             return self._send(403, b'This action can only be started from the status page.\n')
         try:
-            length = max(0, min(int(self.headers.get('Content-Length') or 0), 4096))
+            length = max(0, min(int(self.headers.get("Content-Length") or 0), 16384))
         except ValueError:
             return self._send(400, b'Bad request.\n')
         form = urllib.parse.parse_qs(self.rfile.read(length).decode('utf-8', 'replace'))
         if action == '/run-scan':
             return self._start_scan()
+        if action == '/ignore':
+            return self._ignore((form.get('line') or [''])[0], (form.get('action') or [''])[0])
         folder = (form.get('folder') or [''])[0].strip().strip('/')
         if folder:
             real = os.path.realpath(os.path.join(VIEW, folder))
@@ -279,6 +318,83 @@ class Handler(BaseHTTPRequestHandler):
             pass
         self._send(303, headers=[('Location', 'status.html')])
 
+
+    def _problems(self):
+        """A page listing what the last health report found, with a button on each
+        finding to stop it being counted and announced ("ignore"), or to undo that."""
+        sections, scope = read_report()
+        ignored = read_ignored()
+        try:
+            css = open(CSS, encoding='utf-8').read()
+        except OSError:
+            css = ''
+        e = html.escape
+
+        def button(line, action, label):
+            return ('<form method="post" action="ignore" style="margin:0"><input type="hidden" name="line" value="%s">'
+                    '<input type="hidden" name="action" value="%s"><button type="submit" class="small">%s</button></form>'
+                    % (e(line), action, label))
+
+        body, hidden = [], []
+        for title, lines in sections:
+            shown = [line for line in lines if line not in ignored]
+            hidden += [(title, line) for line in lines if line in ignored]
+            body.append('<section><h2>%s: %d</h2>' % (e(title), len(shown)))
+            if shown:
+                by_folder = {}
+                for line in shown:
+                    by_folder.setdefault(line.strip().split('/')[0], []).append(line)
+                body.append('<table>')
+                for folder in sorted(by_folder):
+                    body.append('<tr><th colspan="2">%s</th></tr>' % e(folder))
+                    for line in by_folder[folder]:
+                        body.append('<tr><td>%s</td><td style="text-align:right">%s</td></tr>'
+                                    % (e(line.strip()), button(line, 'ignore', 'Ignore')))
+                body.append('</table>')
+            else:
+                body.append('<p class="none">None.</p>')
+            body.append('</section>')
+        if hidden:
+            body.append('<section><h2>Ignored: %d</h2><p class="sub" style="margin:0 0 10px">Not counted on the status page '
+                        'and not announced. One that gets fixed is forgotten, so it is reported again if it comes back.</p><table>'
+                        % len(hidden))
+            for title, line in hidden:
+                body.append('<tr><td>%s<br><span class="dim">%s</span></td><td style="text-align:right">%s</td></tr>'
+                            % (e(line.strip()), e(title), button(line, 'restore', 'Stop ignoring')))
+            body.append('</table></section>')
+        if not sections:
+            body = ['<section><p class="none">No health report yet. Run one from the status page.</p></section>']
+        page = (
+            '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width, initial-scale=1"><title>Problems - rar2fs-dock</title>'
+            '<style>%s</style></head><body><main>'
+            '<h1>Problems</h1><p class="sub"><a href="status.html">&larr; Back to the status page</a> &middot; '
+            'from the last health report%s &middot; <a href="health-report.txt">as plain text</a></p>%s'
+            '</main></body></html>'
+        ) % (css, (' (<b>%s</b>)' % e(scope)) if scope else '', ''.join(body))
+        self._send(200, page.encode('utf-8', 'replace'), 'text/html; charset=utf-8')
+
+    def _ignore(self, line, action):
+        """Add one finding to the ignore list, or take it off."""
+        if not line or len(line) > 2000 or '\n' in line or '\r' in line or action not in ('ignore', 'restore'):
+            return self._send(400, b'Bad request.\n')
+        with _ignore_lock:
+            ignored = read_ignored()
+            if action == 'ignore':
+                # only something the report really lists can be ignored
+                if not any(line in lines for _, lines in read_report()[0]):
+                    return self._send(400, b'That is not in the current report.\n')
+                ignored.add(line)
+            else:
+                ignored.discard(line)
+            with open(IGNORED + '.tmp', 'w', encoding='utf-8', errors='surrogateescape') as f:
+                f.write(''.join(entry + '\n' for entry in sorted(ignored)))
+            os.replace(IGNORED + '.tmp', IGNORED)
+        try:
+            subprocess.run(['status-page'], timeout=60, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+        self._send(303, headers=[('Location', 'problems')])
 
     def _start_scan(self):
         """Start a size scan in the background, then show the page once it is under way."""

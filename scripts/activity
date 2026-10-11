@@ -1,0 +1,186 @@
+#!/usr/bin/env python3
+"""Works out what is being read from the drive right now, and by whom.
+
+Two sources are combined:
+
+  - HAProxy tells this program about every request as it starts (who, from where, which
+    path), through the log socket /tmp/activity.sock - see the haproxy.cfg the
+    entrypoint writes. Passwords never come this way: only the user name is passed on.
+  - The files the two WebDAV servers (rclone) have open are read from /proc. How far
+    into each file they are gives the progress, and how fast that moves gives the speed.
+
+A file counts as "being read" while it is open, or was asked for in the last few
+seconds (players fetch a film as many short requests, with gaps between them).
+
+The result is written to /tmp/activity.json every two seconds:
+
+    {"updated": 1700000000,
+     "reading":  [{"path": "films/Some Film/film.mkv", "short_names": false,
+                   "users": ["plex"], "clients": ["192.168.1.20"], "connections": 1,
+                   "size": 123, "position": 45, "percent": 36, "bytes_per_second": 900000,
+                   "since": 1699999000}],
+     "browsing": [{"user": "plex", "client": "192.168.1.20", "listings_last_minute": 340}]}
+
+status-page shows it ("In use now"), status-data copies it into status.json, and the
+Windows scripts read it before they restart the container (windows\\in-use.ps1).
+"""
+import json
+import os
+import socket
+import threading
+import time
+import urllib.parse
+from collections import deque
+
+SOCKET = '/tmp/activity.sock'
+OUT = '/tmp/activity.json'
+ROOTS = {'8080': '/view', '8082': '/short'}     # HAProxy port -> what that port serves
+INTERVAL = 2            # seconds between looks at /proc
+RECENT = 20             # a file asked for this recently still counts as being read
+REMEMBER = 900          # how long a request is kept, to say who is reading a file
+LISTING_WINDOW = 60
+
+requests = deque(maxlen=20000)      # (time, method, user, client, root, path)
+lock = threading.Lock()
+
+
+def listen():
+    """Receive HAProxy's log lines: ...RQ|<client>|<port>|<user>|<method>|<path>"""
+    try:
+        os.unlink(SOCKET)
+    except OSError:
+        pass
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    old = os.umask(0o077)
+    try:
+        sock.bind(SOCKET)
+    finally:
+        os.umask(old)
+    while True:
+        try:
+            line = sock.recv(8192).decode('utf-8', 'replace')
+            at = line.find('RQ|')
+            if at < 0:
+                continue
+            parts = line[at:].rstrip('\n').split('|', 5)
+            if len(parts) != 6:
+                continue
+            _, client, port, user, method, path = parts
+            root = ROOTS.get(port)
+            if not root:
+                continue
+            path = urllib.parse.unquote(path, errors='surrogateescape').strip('/')
+            with lock:
+                requests.append((time.time(), method, user or '?', client, root, path))
+        except Exception:
+            time.sleep(0.2)
+
+
+def server_pids():
+    pids = []
+    for name in os.listdir('/proc'):
+        if not name.isdigit():
+            continue
+        try:
+            with open('/proc/%s/comm' % name) as f:
+                if f.read().strip() == 'rclone':
+                    pids.append(name)
+        except OSError:
+            pass
+    return pids
+
+
+def open_files():
+    """{(pid, fd, real path): position} for every media file the servers have open."""
+    found = {}
+    for pid in server_pids():
+        try:
+            fds = os.listdir('/proc/%s/fd' % pid)
+        except OSError:
+            continue
+        for fd in fds:
+            try:
+                target = os.readlink('/proc/%s/fd/%s' % (pid, fd))
+                if not target.startswith(('/view/', '/short/')):
+                    continue
+                with open('/proc/%s/fdinfo/%s' % (pid, fd)) as f:
+                    position = int(f.readline().split()[1])
+            except (OSError, ValueError, IndexError):
+                continue
+            found[(pid, fd, target)] = position
+    return found
+
+
+def snapshot(now, files, before, elapsed):
+    """The picture at one moment, from the open files and the recent requests."""
+    with lock:
+        while requests and requests[0][0] < now - REMEMBER:
+            requests.popleft()
+        recent = list(requests)
+
+    reading = {}        # (root, path) -> entry
+    for (pid, fd, target), position in files.items():
+        root = '/short' if target.startswith('/short/') else '/view'
+        entry = reading.setdefault((root, target[len(root) + 1:]), {'connections': 0, 'position': 0, 'speed': 0})
+        entry['connections'] += 1
+        entry['position'] = max(entry['position'], position)
+        earlier = before.get((pid, fd, target))
+        if earlier is not None and position > earlier and elapsed > 0:
+            entry['speed'] += (position - earlier) / elapsed
+
+    browsing = {}       # (user, client) -> folder listings in the last minute
+    for at, method, user, client, root, path in recent:
+        if method == 'PROPFIND':
+            if at > now - LISTING_WINDOW:
+                browsing[(user, client)] = browsing.get((user, client), 0) + 1
+        elif method == 'GET' and at > now - RECENT and (root, path) not in reading:
+            if os.path.isfile(os.path.join(root, path)):
+                reading[(root, path)] = {'connections': 0, 'position': 0, 'speed': 0}
+
+    result = []
+    for (root, path), entry in sorted(reading.items()):
+        asked = [r for r in recent if r[1] == 'GET' and r[4] == root and r[5] == path]
+        try:
+            size = os.path.getsize(os.path.join(root, path))
+        except OSError:
+            size = 0
+        position = min(entry['position'], size) if size else entry['position']
+        result.append({
+            'path': path,
+            'short_names': root == '/short',
+            'users': sorted({r[2] for r in asked}),
+            'clients': sorted({r[3] for r in asked}),
+            'connections': entry['connections'],
+            'size': size,
+            'position': position,
+            'percent': int(position * 100 / size) if size else None,
+            'bytes_per_second': int(entry['speed']),
+            'since': int(min(r[0] for r in asked)) if asked else None,
+        })
+    return {
+        'updated': int(now),
+        'reading': result,
+        'browsing': [{'user': user, 'client': client, 'listings_last_minute': count}
+                     for (user, client), count in sorted(browsing.items())],
+    }
+
+
+def main():
+    threading.Thread(target=listen, daemon=True).start()
+    before, last = {}, time.time()
+    while True:
+        time.sleep(INTERVAL)
+        try:
+            now = time.time()
+            files = open_files()
+            result = snapshot(now, files, before, now - last)
+            before, last = files, now
+            with open(OUT + '.tmp', 'w', encoding='utf-8', errors='replace') as f:
+                json.dump(result, f)
+            os.replace(OUT + '.tmp', OUT)
+        except Exception:
+            pass        # a file or process went away mid-look: try again next time
+
+
+if __name__ == '__main__':
+    main()
