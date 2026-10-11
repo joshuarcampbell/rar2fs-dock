@@ -301,7 +301,13 @@ fi
 
 # ---------------------------------------------------------------- 4. start
 step "Building and starting the container (the first build takes several minutes)"
-( cd "$repo" && docker compose up -d --build ) || stop "Docker could not start the container - see the messages above."
+( cd "$repo" && docker compose build ) || stop "Docker could not build the image - see the messages above."
+# Hand the two folders that outlive the container (its saved history, and the HTTPS
+# certificate) to the user it runs as. They belong to someone else if that user has
+# changed since last time - and then the container could not start.
+( cd "$repo" && docker compose run --rm --no-deps -T --user 0 --entrypoint chown rar2fs -R "${run_uid:-1000}:${run_gid:-1000}" /state /tls ) > /dev/null 2>&1 \
+  || note "NOTE: couldn't hand the saved history to user id ${run_uid:-1000}; if the container doesn't start, see: sudo docker logs $NAME"
+( cd "$repo" && docker compose up -d ) || stop "Docker could not start the container - see the messages above."
 note "Waiting for it to report healthy..."
 state=""; tries=0
 while [ "$tries" -lt 60 ]; do

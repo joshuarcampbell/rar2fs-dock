@@ -33,8 +33,10 @@ for dir in /state /tls; do
   if ! ( : > "$dir/.write-test" ) 2>/dev/null || { [ -e /state/started ] && [ ! -w /state/started ]; }; then
     echo "ERROR: user id $(id -u) can't write to $dir."
     if [ "$dir" = /state ]; then
-      echo "       The saved history belongs to another user id (did PUID change?). Either set PUID back, or"
-      echo "       remove it and start afresh: docker compose down; docker volume rm <folder name>_state; docker compose up -d"
+      echo "       The saved history belongs to another user id (did PUID change?). On Linux, this hands it over:"
+      echo "         sudo sh linux/setup.sh"
+      echo "       Or set PUID back; or remove the history and start afresh:"
+      echo "         docker compose down; docker volume rm <folder name>_state; docker compose up -d"
     else
       echo "       Give it the tls folder next to docker-compose.yml: sudo chown -R $(id -u):$(id -g) tls"
     fi
