@@ -711,6 +711,7 @@ mount. Each line is `ok`, `CHECK` or `PROBLEM`, with the command that fixes it.
 | Connect Plex on another Windows PC | `.\windows\connect-plex.ps1` - see [Plex on another Windows PC](#plex-on-another-windows-pc) |
 | Find out why something isn't working | `.\windows\doctor.ps1` - see [Setup check](#setup-check) |
 | See whether anyone is watching right now | `.\windows\in-use.ps1`, or *In use now* on the status page - see [What's in use](#whats-in-use-and-restart-warnings) |
+| Stop a scan from slowing the PC down | `.\windows\limit.ps1 -Cpu half`, or *Processor limit* on the tray icon - see [If the PC slows down during scans](#if-the-pc-slows-down-during-scans) |
 | Give an encrypted archive its password | `config\passwords.conf` - see [Password-protected archives](#password-protected-archives) |
 | Save your setup, or move it to another PC | `.\windows\backup.ps1` - see [Backup and restore](#backup-and-restore) |
 | See at a glance whether it's healthy | The [tray icon](#tray-icon) |
@@ -949,7 +950,9 @@ Desktop not running, usually). A notification pops up when the state changes.
 ```
 
 Right-click it for: the current state, *Open status page*, *Open drive*, *Remount
-drive* and *Restart container* (which asks first if something is being read).
+drive*, *Restart container* (which asks first if something is being read) and
+*Processor limit*, which caps how much of the processor the container may use,
+[without a restart](#if-the-pc-slows-down-during-scans).
 Double-click opens the status page. The menu follows
 Windows' light or dark app mode. The setup wizard
 offers to install it. Windows may tuck new icons behind the **^** arrow; drag it out
@@ -1433,7 +1436,23 @@ CPU_LIMIT=4
 MEMORY_LIMIT=4g
 ```
 
-then `docker compose up -d`. `CPU_LIMIT` is a number of processor cores (halves work:
+then `docker compose up -d`. Or change the processor limit **while it runs**, with no
+restart and nothing interrupted - useful in the middle of a scan:
+
+```powershell
+.\windows\limit.ps1                 # show the limit now
+.\windows\limit.ps1 -Cpu 4          # at most 4 cores
+.\windows\limit.ps1 -Cpu half       # half of what Docker has (also: quarter)
+.\windows\limit.ps1 -Cpu none       # no limit
+```
+
+It takes effect at once and is saved to `.env` as `CPU_LIMIT`, so it's still there
+after a restart (add `-NoSave` for a change that only lasts until then). The
+[tray icon](#tray-icon)'s *Processor limit* menu does the same with one click: it lists
+"No limit" and then every number of cores the PC has, with a tick on the one in force. The
+memory limit can't be changed this way; Docker only applies it at a restart.
+
+`CPU_LIMIT` is a number of processor cores (halves work:
 `1.5`). About half of what the PC has leaves it comfortable to use; Task Manager →
 *Performance* → *CPU* shows the count as *Logical processors*. Scans take longer in
 exchange - the work is spread out, not reduced. `MEMORY_LIMIT` is rarely needed; if

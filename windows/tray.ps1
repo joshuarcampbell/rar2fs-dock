@@ -137,6 +137,48 @@ $openDrive = $menu.Items.Add("Open drive")
 [void]$menu.Items.Add("-")
 $remount = $menu.Items.Add("Remount drive")
 $restart = $menu.Items.Add("Restart container")
+# Processor limit: changed while the container runs, nothing restarts (see limit.ps1).
+# The list is built each time it opens, from the number of cores Docker has: "No limit",
+# then one entry per core count, with a tick on the one in force.
+$limitMenu = New-Object System.Windows.Forms.ToolStripMenuItem "Processor limit"
+[void]$menu.Items.Add($limitMenu)
+[void]$limitMenu.DropDownItems.Add("...")       # a sub-menu needs an entry before it can open
+$setLimit = {
+    param($sender, $e)
+    $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "limit.ps1") -Cpu $sender.Tag 2>&1 | Select-Object -First 1
+    $tray.ShowBalloonTip(5000, "rar2fs-dock", [string]$out, [System.Windows.Forms.ToolTipIcon]::Info)
+}
+# Which core counts to offer: every one up to 16; on bigger machines every second or
+# fourth, so the list stays a sensible length. (Any number works with limit.ps1 -Cpu.)
+function Get-CoreChoices([int]$cores) {
+    $step = if ($cores -le 16) { 1 } elseif ($cores -le 32) { 2 } else { 4 }
+    $list = @(1) + @(for ($n = $step; $n -lt $cores; $n += $step) { $n }) | Where-Object { $_ -lt $cores } | Sort-Object -Unique
+    return @($list)
+}
+$limitMenu.add_DropDownOpening({
+    $cores = 0; [void][int]::TryParse((& docker info --format '{{.NCPU}}' 2>$null), [ref]$cores)
+    $limitMenu.DropDownItems.Clear()
+    if ($cores -le 0) {
+        $none = $limitMenu.DropDownItems.Add("Docker isn't answering"); $none.Enabled = $false
+        return
+    }
+    $now = [double](& docker inspect rar2fs --format '{{.HostConfig.NanoCpus}}' 2>$null) / 1e9
+    if ($now -le 0 -or $now -ge $cores) { $now = 0 }       # 0 = no limit
+    $choices = @(@{ Text = "No limit (all $cores cores)"; Value = 0 })
+    foreach ($n in (Get-CoreChoices $cores)) { $choices += @{ Text = $(if ($n -eq 1) { "1 core" } else { "$n cores" }); Value = $n } }
+    # a limit set by hand that isn't in the list (1.5, say) is shown too, so the tick has somewhere to go
+    if ($now -gt 0 -and -not ($choices | Where-Object { $_.Value -eq $now })) {
+        $choices += @{ Text = "$($now.ToString('0.##', [Globalization.CultureInfo]::InvariantCulture)) cores"; Value = $now }
+        $choices = @($choices[0]) + @($choices | Select-Object -Skip 1 | Sort-Object { $_.Value })
+    }
+    foreach ($choice in $choices) {
+        $item = New-Object System.Windows.Forms.ToolStripMenuItem $choice.Text
+        $item.Tag = $(if ($choice.Value -eq 0) { "none" } else { ([double]$choice.Value).ToString('0.##', [Globalization.CultureInfo]::InvariantCulture) })
+        $item.Checked = ($choice.Value -eq $now)
+        $item.add_Click($setLimit)
+        [void]$limitMenu.DropDownItems.Add($item)
+    }
+})
 [void]$menu.Items.Add("-")
 $exit = $menu.Items.Add("Exit")
 $tray.ContextMenuStrip = $menu
@@ -175,7 +217,22 @@ public class Rar2fsDockDarkRenderer : ToolStripProfessionalRenderer {
             e.Graphics.FillRectangle(brush, new Rectangle(2, 0, e.Item.Width - 3, e.Item.Height));
         }
     }
+    protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e) {
+        e.ArrowColor = Color.FromArgb(240, 240, 240);       // the arrow that opens a sub-menu
+        base.OnRenderArrow(e);
+    }
+    protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e) {
+        Rectangle r = e.ImageRectangle;                      // a plain tick, no coloured box
+        e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        using (Pen pen = new Pen(Color.FromArgb(240, 240, 240), 2)) {
+            e.Graphics.DrawLines(pen, new Point[] {
+                new Point(r.Left + 3, r.Top + r.Height / 2), new Point(r.Left + r.Width / 2 - 1, r.Bottom - 4), new Point(r.Right - 3, r.Top + 4) });
+        }
+    }
     protected override void OnRenderSeparator(ToolStripSeparatorRenderEventArgs e) {
+        using (SolidBrush brush = new SolidBrush(Color.FromArgb(43, 43, 43))) {
+            e.Graphics.FillRectangle(brush, new Rectangle(0, 0, e.Item.Width, e.Item.Height));
+        }
         int y = e.Item.Height / 2;
         using (Pen pen = new Pen(Color.FromArgb(80, 80, 80))) {
             e.Graphics.DrawLine(pen, 4, y, e.Item.Width - 4, y);
@@ -193,9 +250,13 @@ $applyTheme = {
     if (Test-DarkMode) {
         $menu.Renderer = $darkRenderer
         $menu.BackColor = [System.Drawing.Color]::FromArgb(43, 43, 43)
+        $limitMenu.DropDown.Renderer = $darkRenderer
+        $limitMenu.DropDown.BackColor = $menu.BackColor
     } else {
         $menu.RenderMode = [System.Windows.Forms.ToolStripRenderMode]::ManagerRenderMode
         $menu.BackColor = [System.Drawing.SystemColors]::Control
+        $limitMenu.DropDown.RenderMode = [System.Windows.Forms.ToolStripRenderMode]::ManagerRenderMode
+        $limitMenu.DropDown.BackColor = $menu.BackColor
     }
 }
 $menu.add_Opening($applyTheme)
