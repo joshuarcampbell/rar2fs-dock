@@ -178,12 +178,12 @@ cat <<HTML
 </table>
 <h2 style="margin-top:16px">Every setting</h2>
 <p class="sub" style="margin:0 0 10px">All of these are set in <code>.env</code>, followed by <code>docker compose up -d</code>. Passwords, tokens and addresses that contain one are not shown.</p>
-<table><tr><th>Setting</th><th>Value now</th><th></th><th>What it does</th></tr>
+<table class="settings"><tr><th>Setting</th><th>Value now</th><th>What it does</th></tr>
 HTML
 # name, value now, default, what it does
 setting() {
   if [ "$2" = "$3" ]; then state='<span class="dim">default</span>'; else state='<b>changed</b>'; fi
-  printf '<tr><td><code>%s</code></td><td><code>%s</code></td><td>%s</td><td class="dim">%s</td></tr>\n' \
+  printf '<tr><td><code>%s</code></td><td><code>%s</code><br>%s</td><td class="dim">%s</td></tr>\n' \
     "$1" "$(printf '%s' "${2:-(empty)}" | esc)" "$state" "$4"
 }
 hidden() { [ -n "$1" ] && echo '(set - hidden)'; }      # for values that are secrets

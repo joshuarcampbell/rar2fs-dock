@@ -67,6 +67,9 @@ fi
 
 # ---- status page (port 8081) and the watchdog that keeps it fresh ----
 mkdir -p /state/www
+# /state survives restarts: don't let the page show the last run's "healthy" until
+# monitor has done its first check of this one
+echo starting > /state/health
 status-page 2>/dev/null || true
 status-server &
 monitor &
