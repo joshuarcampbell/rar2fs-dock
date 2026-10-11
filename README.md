@@ -19,6 +19,7 @@ Plex server, for instance - can mount the same view.
 [Plex on this PC](#plex-on-the-same-windows-pc) ·
 [Plex on another Windows PC](#plex-on-another-windows-pc) · [Plex on Linux](#plex-on-linux) ·
 [Everyday use](#everyday-use) · [Extras](#extras) · [Settings](#settings) ·
+[Slow during scans](#if-the-pc-slows-down-during-scans) ·
 [This PC only](#keeping-it-to-this-pc-only) · [Troubleshooting](#troubleshooting) ·
 [Security](#security) · [Why this design](#why-this-design)
 
@@ -1400,6 +1401,7 @@ it, under **Every setting** (passwords and tokens are hidden).
 | `AUTO_RESTART` | [Restart](#automatic-restart) after three failed health checks | `1` (on) |
 | `HEALTH_REPORT_DAYS` | Days between scheduled [health reports](#health-report); `0` = never | `7` |
 | `LIBRARY_INDEX_MINUTES` | Minutes between rebuilds of the [library](#the-library-search-recently-added-duplicates-sizes) index | `10` |
+| `CPU_LIMIT`, `MEMORY_LIMIT` | Ceilings for the container - see [If the PC slows down during scans](#if-the-pc-slows-down-during-scans) | none |
 | `RAR2FS_OPTS` | Options passed to rar2fs. The defaults speed up large multi-part sets and pre-read archives at start-up. | `--seek-length=1 -o warmup` |
 | `DIR_CACHE_TIME` | How long the drive remembers a folder's listing before looking again | `15s` |
 | `RCLONE_OPTS` | Extra options for the WebDAV server, for the rare case you need one | none |
@@ -1418,6 +1420,52 @@ Three things have files of their own, all gitignored:
 move your values into `.env` (the names are the same), then run
 `git checkout -- docker-compose.yml` and update again.
 
+## If the PC slows down during scans
+
+A media server's first scan of a large library reads inside every archive, and that can
+use every processor core the PC has for a long time. Three things share the work, and
+each has its own remedy. Start with the first.
+
+**1. Give the container a ceiling.** In `.env`:
+
+```ini
+CPU_LIMIT=4
+MEMORY_LIMIT=4g
+```
+
+then `docker compose up -d`. `CPU_LIMIT` is a number of processor cores (halves work:
+`1.5`). About half of what the PC has leaves it comfortable to use; Task Manager →
+*Performance* → *CPU* shows the count as *Logical processors*. Scans take longer in
+exchange - the work is spread out, not reduced. `MEMORY_LIMIT` is rarely needed; if
+you set it, don't go below `2g`, or the container may be stopped when it runs out.
+
+**2. Give Docker itself a ceiling.** On Windows the container lives inside Docker's
+own small virtual machine, which Task Manager shows as *Vmmem*. If that is what's
+busy, limit the whole machine: create a file called `.wslconfig` in your user folder
+(`C:\Users\<you>\.wslconfig`) containing
+
+```ini
+[wsl2]
+processors=4
+memory=8GB
+```
+
+then quit Docker Desktop, run `wsl --shutdown` in PowerShell and start Docker Desktop
+again. This applies to everything Docker runs, not only rar2fs-dock.
+
+**3. Slow the scan down at its source.** The ceilings above don't cover the media
+server itself or the drive on its side, and both work hard during a scan. In Plex:
+*Settings → Library*, turn off *Generate video preview thumbnails*, *Generate intro
+video markers* and *Generate chapter thumbnails* for now (or set them to run *as a
+scheduled task* at night), and scan one library at a time instead of all at once.
+Those extras read every file from start to finish, which through archives is far
+more work than the scan itself.
+
+To see who is doing what while it's slow: *In use now* on the
+[status page](#whats-in-use-and-restart-warnings) shows what the media server is
+reading and how busily it is listing folders, and `docker stats rar2fs` shows how much
+processor and memory the container is using against its ceiling.
+
 ## Keeping it to this PC only
 
 If no other device needs it, put this in `.env` and run `docker compose up -d`:
@@ -1435,6 +1483,8 @@ say other devices will connect.
 Start with `.\windows\doctor.ps1` - see [Setup check](#setup-check). It finds most of
 the mistakes below by itself and says how to fix them.
 
+- **The PC becomes sluggish or locks up while a media server scans** - see
+  [If the PC slows down during scans](#if-the-pc-slows-down-during-scans).
 - **The drive letter doesn't appear after logging in** - it waits for the container.
   Check that Docker Desktop is running (`docker ps`). Running
   `.\windows\mount.ps1` in a window shows what it's waiting for.

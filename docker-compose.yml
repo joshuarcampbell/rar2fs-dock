@@ -13,6 +13,11 @@ services:
     # APPARMOR_PROFILE=rar2fs-dock in .env instead (see README, "Security").
     # Docker Desktop on Windows and Mac doesn't use AppArmor, so there it changes nothing.
     security_opt: ["apparmor:${APPARMOR_PROFILE:-unconfined}"]
+    # Optional ceilings, so a library scan can't take over the PC. CPU_LIMIT is a number
+    # of processor cores (2, or 1.5); MEMORY_LIMIT is an amount such as 4g. 0 = no limit.
+    # Set them in .env (see README, "If the PC slows down during scans").
+    cpus: ${CPU_LIMIT:-0}
+    mem_limit: ${MEMORY_LIMIT:-0}
     ports:
       # All are reachable from your network by default, behind the logins.
       # Set BIND=127.0.0.1 in .env to limit them to this PC.
@@ -88,6 +93,9 @@ services:
       HEALTH_REPORT_DAYS: ${HEALTH_REPORT_DAYS:-7}
       # Minutes between rebuilds of the library index (search, recently added, duplicates).
       LIBRARY_INDEX_MINUTES: ${LIBRARY_INDEX_MINUTES:-10}
+      # The two ceilings above, passed in only so the status page can show them.
+      CPU_LIMIT: ${CPU_LIMIT:-0}
+      MEMORY_LIMIT: ${MEMORY_LIMIT:-0}
     volumes:
       # Extra logins: config/users.htpasswd (see README, "More logins")
       - "./config:/config:ro"
