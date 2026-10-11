@@ -91,7 +91,7 @@ while IFS= read -r dir; do
 
   # readable = rar2fs shows at least one file here that is not in the raw folder
   if grep -qi '\.rar$' "$tmp/ls"; then
-    ls -1 "$(view_of "$dir")" 2>/dev/null | grep -vxFf "$tmp/ls" | grep -q . || echo "$dir" >> "$tmp/unreadable"
+    find "$(view_of "$dir")" -mindepth 1 -maxdepth 1 ! -name '.*' -printf '%f\n' 2>/dev/null | grep -vxFf "$tmp/ls" | grep -q . || echo "$dir" >> "$tmp/unreadable"
   fi
 done < "$tmp/dirs"
 

@@ -24,7 +24,7 @@ health=$(cut -f1 /state/health 2>/dev/null); detail=$(cut -s -f2- /state/health 
 case "$health" in
   healthy)   badge=ok;   label="Healthy" ;;
   unhealthy) badge=bad;  label="Unhealthy" ;;
-  *)         badge=wait; label="Starting" ;;
+  *)         badge="wait"; label="Starting" ;;
 esac
 
 {

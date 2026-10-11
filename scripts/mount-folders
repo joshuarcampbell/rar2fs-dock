@@ -99,8 +99,6 @@ write_rarconfig() {  # (searches the folders in /tmp/folders.plan for names with
   [ -s "$RARCONFIG" ] && say "passwords: $(grep -c '^\[' "$RARCONFIG") archive(s) have one"
   return 0
 }
-# the rar2fs option for it, when there is anything in the file
-rarconfig_opt() { [ -s "$RARCONFIG" ] && printf '%s' "--config=$RARCONFIG"; }
 
 mount_name() {  # name, members
   name=$1; members=$2
@@ -112,15 +110,18 @@ mount_name() {  # name, members
       echo "$src" >> "$EXPECTED" ;;
     *) src=$members ;;
   esac
+  # the options for rar2fs: yours, plus the password file when there is anything in it
+  opts=$RAR2FS_OPTS
+  [ -s "$RARCONFIG" ] && opts="$opts --config=$RARCONFIG"
   if [ "${NESTED_RAR:-1}" = "1" ]; then
     mkdir -p "/pass1/$name"
-    rar2fs -o allow_other,ro $RAR2FS_OPTS $(rarconfig_opt) "$src" "/pass1/$name" || { say "ERROR: could not mount $name"; return 1; }
+    rar2fs -o allow_other,ro $opts "$src" "/pass1/$name" || { say "ERROR: could not mount $name"; return 1; }
     echo "/pass1/$name" >> "$EXPECTED"
     src="/pass1/$name"
   fi
   mkdir -p "/view/$name"
   echo "rar2fs: $src -> /view/$name"
-  rar2fs -o allow_other,ro $RAR2FS_OPTS $(rarconfig_opt) "$src" "/view/$name" || { say "ERROR: could not mount $name"; return 1; }
+  rar2fs -o allow_other,ro $opts "$src" "/view/$name" || { say "ERROR: could not mount $name"; return 1; }
   echo "/view/$name" >> "$EXPECTED"
   printf '%s\t%s\n' "$name" "$members" >> "$STATE"
 }
