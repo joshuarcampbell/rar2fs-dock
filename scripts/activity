@@ -34,7 +34,7 @@ from collections import deque
 
 SOCKET = '/tmp/activity.sock'
 OUT = '/tmp/activity.json'
-ROOTS = {'8080': '/view', '8082': '/short'}     # HAProxy port -> what that port serves
+ROOTS = {'8080': '/view', '8082': '/short/view'}     # HAProxy port -> what that port serves
 INTERVAL = 2            # seconds between looks at /proc
 RECENT = 20             # a file asked for this recently still counts as being read
 REMEMBER = 900          # how long a request is kept, to say who is reading a file
@@ -101,7 +101,7 @@ def open_files():
         for fd in fds:
             try:
                 target = os.readlink('/proc/%s/fd/%s' % (pid, fd))
-                if not target.startswith(('/view/', '/short/')):
+                if not target.startswith(('/view/', '/short/view/')):
                     continue
                 with open('/proc/%s/fdinfo/%s' % (pid, fd)) as f:
                     position = int(f.readline().split()[1])
@@ -120,7 +120,7 @@ def snapshot(now, files, before, elapsed):
 
     reading = {}        # (root, path) -> entry
     for (pid, fd, target), position in files.items():
-        root = '/short' if target.startswith('/short/') else '/view'
+        root = '/short/view' if target.startswith('/short/view/') else '/view'
         entry = reading.setdefault((root, target[len(root) + 1:]), {'connections': 0, 'position': 0, 'speed': 0})
         entry['connections'] += 1
         entry['position'] = max(entry['position'], position)
@@ -147,7 +147,7 @@ def snapshot(now, files, before, elapsed):
         position = min(entry['position'], size) if size else entry['position']
         result.append({
             'path': path,
-            'short_names': root == '/short',
+            'short_names': root == '/short/view',
             'users': sorted({r[2] for r in asked}),
             'clients': sorted({r[3] for r in asked}),
             'connections': entry['connections'],

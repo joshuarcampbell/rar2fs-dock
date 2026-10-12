@@ -25,7 +25,8 @@
 #                        the same name twice merges those folders into one
 #   --subfolders         folders sharing a name become name/name-1, name/name-2 instead
 #   --network            other devices will connect (default: this machine only)
-#   --short-paths        add the short-names view, for Windows PCs that will connect
+#   --short-paths        add the short-names view (only useful if Windows PCs will open
+#                        the drive; it is not asked about, and Linux has no need of it)
 #   --mount-at DIR       mount the unpacked folders under DIR on this machine
 #   --no-mount           don't mount them here
 #   --user UID:GID       run the container as this user and group, instead of the one
@@ -57,7 +58,7 @@ while [ $# -gt 0 ]; do
     --no-start)    start=0; shift ;;
     --force)       force=1; shift ;;
     --yes|-y)      yes=1; shift ;;
-    -h|--help)     sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)     sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown option: $1 (try --help)"; exit 1 ;;
   esac
 done
@@ -256,7 +257,6 @@ if [ -f "$env_file" ]; then
   fi
 else
   [ "$network" = 1 ] || { ask_yes "Will other devices on your network connect to it (a media server on another machine, a Windows PC)?" n && network=1 || true; }
-  [ "$short" = 1 ] || [ "$network" = 0 ] || { ask_yes "Will Windows PCs open the drive? (adds a view with over-long names shortened for them)" n && short=1 || true; }
   password=$(head -c 24 /dev/urandom | base64 | tr -d '+/=\n' | cut -c1-24)
   {
     echo "# Written by linux/setup.sh. See .env.example and the README (\"Settings\") for"
@@ -305,8 +305,11 @@ step "Building and starting the container (the first build takes several minutes
 # Hand the two folders that outlive the container (its saved history, and the HTTPS
 # certificate) to the user it runs as. They belong to someone else if that user has
 # changed since last time - and then the container could not start.
-( cd "$repo" && docker compose run --rm --no-deps -T --user 0 --entrypoint chown rar2fs -R "${run_uid:-1000}:${run_gid:-1000}" /state /tls ) > /dev/null 2>&1 \
-  || note "NOTE: couldn't hand the saved history to user id ${run_uid:-1000}; if the container doesn't start, see: sudo docker logs $NAME"
+# (A one-off container, as root but with only the two abilities chown needs.)
+( cd "$repo" && docker compose run --rm --no-deps -T --user 0 --cap-add CHOWN --cap-add DAC_OVERRIDE \
+    --entrypoint chown rar2fs -R "${run_uid:-1000}:${run_gid:-1000}" /state /tls ) > /dev/null 2> "$folders.err" \
+  || note "NOTE: couldn't hand the saved history to user id ${run_uid:-1000} ($(tail -1 "$folders.err")). If the container doesn't start, see: sudo docker logs $NAME"
+rm -f "$folders.err"
 ( cd "$repo" && docker compose up -d ) || stop "Docker could not start the container - see the messages above."
 note "Waiting for it to report healthy..."
 state=""; tries=0

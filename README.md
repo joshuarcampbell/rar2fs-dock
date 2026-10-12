@@ -730,9 +730,11 @@ sudo sh linux/setup.sh --yes --folder /srv/media/films=films --folder /srv/media
 ```
 
 `--network` lets other devices connect (the default is this machine only),
-`--short-paths` adds the [short-names view](#short-names-for-windows) for Windows PCs
-that will connect, `--subfolders` keeps same-named folders side by side, `--no-mount`
-skips step 6, and `--no-start` only writes the files.
+`--subfolders` keeps same-named folders side by side, `--no-mount` skips step 6,
+`--user 1000:1000` picks the user the container runs as yourself, and `--no-start`
+only writes the files. Shortened names are a Windows matter and aren't asked about;
+if Windows PCs will open the drive from this server, add `--short-paths` (or
+`SHORT_PATHS=1` in `.env`) for the [short-names view](#short-names-for-windows).
 
 **What's different on Linux:**
 

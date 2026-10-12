@@ -116,13 +116,15 @@ media-refresh &
 # Served by its own rclone (127.0.0.1:8078), behind the same HAProxy as the normal drive.
 short_bind=""; short_use=""; short_backend=""
 if [ "${SHORT_PATHS:-0}" = "1" ]; then
-  shortfs /view /short --max-path "${MAX_PATH:-230}" &
+  # the mount point is made here, so that it belongs to whichever user this is (PUID)
+  mkdir -p /short/view
+  shortfs /view /short/view --max-path "${MAX_PATH:-230}" &
   tries=0
-  until mountpoint -q /short || [ "$tries" -ge 20 ]; do sleep 0.5; tries=$((tries + 1)); done
-  if mountpoint -q /short; then
-    echo "/short" >> "$EXPECTED"
-    echo "shortfs: /view -> /short (paths up to ${MAX_PATH:-230} characters)"
-    rclone serve webdav /short --addr 127.0.0.1:8078 --read-only --htpasswd "$HTPASSWD" \
+  until mountpoint -q /short/view || [ "$tries" -ge 20 ]; do sleep 0.5; tries=$((tries + 1)); done
+  if mountpoint -q /short/view; then
+    echo "/short/view" >> "$EXPECTED"
+    echo "shortfs: /view -> /short/view (paths up to ${MAX_PATH:-230} characters)"
+    rclone serve webdav /short/view --addr 127.0.0.1:8078 --read-only --htpasswd "$HTPASSWD" \
       --dir-cache-time "${DIR_CACHE_TIME:-15s}" --ignore-case "$@" $RCLONE_OPTS &
     short_bind="bind :8082 $bind_opts"
     short_use="use_backend rclone_short if { dst_port 8082 }"
