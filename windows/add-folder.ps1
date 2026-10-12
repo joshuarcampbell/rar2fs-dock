@@ -1,9 +1,9 @@
 # Adds a folder to the drive (or removes one) while the container keeps running.
 #
-#     .\windows\add-folder.ps1 -Path E:\Concerts                 -> Y:\concerts
-#     .\windows\add-folder.ps1 -Path E:\More-TV -Name tv         joins the existing "tv" folder
-#     .\windows\add-folder.ps1 -Remove concerts
-#     .\windows\add-folder.ps1 -List
+#     .\rar2fs.ps1 add-folder E:\Concerts                 -> Y:\concerts
+#     .\rar2fs.ps1 add-folder E:\More-TV -Name tv         joins the existing "tv" folder
+#     .\rar2fs.ps1 remove-folder concerts
+#     .\rar2fs.ps1 folders
 #
 # How it works: Docker can't attach a new Windows folder to a running container. But
 # once a whole drive is visible to the container (at /drives/<letter>, read-only), any
@@ -95,7 +95,7 @@ if (-not $driveVisible) {
         $answer = Read-Host "Do that now? [y/N]"
         if ($answer.Trim() -notmatch '^(y|yes)$') { Write-Host "Nothing was changed."; exit 1 }
     }
-    if (-not (Test-Path $override)) { Stop-Here "There is no docker-compose.override.yml yet. Run .\windows\setup.ps1 first." }
+    if (-not (Test-Path $override)) { Stop-Here "There is no docker-compose.override.yml yet. Run .\rar2fs.ps1 setup first." }
     $lines = @(Get-Content $override)
     $mount = "      - `"$($letter.ToUpper()):/:/drives/${letter}:ro`"    # the whole drive, so folders on it can be added without a restart"
     $at = -1
@@ -123,3 +123,4 @@ if ($driveVisible) {
     if ($LASTEXITCODE -ne 0) { Stop-Here "Docker could not restart the container - see above." }
 }
 Write-Host "'$Name' will appear on the drive within a minute."
+exit 0

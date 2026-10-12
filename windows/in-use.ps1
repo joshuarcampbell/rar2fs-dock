@@ -1,7 +1,7 @@
 # Says what is being read from the drive right now, and by whom - so you know whether
 # restarting the container would interrupt somebody's film.
 #
-#     .\windows\in-use.ps1                              print the list
+#     .\rar2fs.ps1 in-use                              print the list
 #     .\windows\in-use.ps1 -AskBefore "restarting"      used by the other scripts: if
 #                                                        something is being read, show it
 #                                                        and ask; returns $true to go ahead

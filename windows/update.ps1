@@ -5,7 +5,7 @@
 #   4. tells you if other devices (a Linux Plex server, say) need anything
 #
 # Run it from a normal PowerShell, in the repo folder:
-#     .\windows\update.ps1
+#     .\rar2fs.ps1 update
 #
 # Coming from an older version that kept your folders in docker-compose.yml? It moves
 # them into docker-compose.override.yml first, so the update can't overwrite them.
@@ -114,7 +114,7 @@ if ($after -ne $before) {
 }
 
 if ($NoStart) { Step "Done (files only)"; exit 0 }
-if (-not (Test-Path (Join-Path $repo ".env"))) { Stop-Update "There is no .env yet. Run .\windows\setup.ps1 first." }
+if (-not (Test-Path (Join-Path $repo ".env"))) { Stop-Update "There is no .env yet. Run .\rar2fs.ps1 setup first." }
 
 # ---------------------------------------------------------------- rebuild
 Step "Rebuilding and restarting the container"
@@ -138,7 +138,7 @@ Note "The container is healthy."
 $certAfter = Get-CertPrint
 $certChanged = ($certAfter -ne $certBefore) -and $certBefore
 $task = Get-ScheduledTask -TaskName "rar2fs-dock mount" -ErrorAction SilentlyContinue
-$mountChanged = [bool]($files | Where-Object { $_ -match '^windows/(mount|install-autostart)\.ps1$' })
+$mountChanged = [bool]($files | Where-Object { $_ -match '^windows/(mount|autostart|install-autostart)\.ps1$' })
 if ($task -and ($mountChanged -or $certChanged)) {
     Step "Remounting the drive"
     $taskArgs = $task.Actions.Arguments
@@ -146,8 +146,7 @@ if ($task -and ($mountChanged -or $certChanged)) {
     if ($taskArgs -match '-Drive ([A-Za-z]:)') { $remount.Drive = $Matches[1] }
     if ($taskArgs -match '-Url (\S+)') { $remount.Url = $Matches[1] }
     if ($taskArgs -match '-Original') { $remount.Original = $true }
-    & (Join-Path $PSScriptRoot "uninstall-autostart.ps1") | Out-Null
-    & (Join-Path $PSScriptRoot "install-autostart.ps1") @remount | Out-Null
+    & (Join-Path $PSScriptRoot "autostart.ps1") @remount | Out-Null           # replaces the old mount
     Note "Remounted $($remount.Drive) ($(if ($certChanged) { 'the certificate changed' } else { 'the mount scripts changed' }))."
 } elseif ($task) {
     Note "The drive didn't need remounting."
@@ -164,3 +163,4 @@ if ($certChanged) {
 }
 if ($files -contains ".env.example") { $notes += "New settings are available - compare .env.example with your .env, or see 'Settings' in the README." }
 if ($notes) { $notes | ForEach-Object { Note "NOTE: $_" } } else { Note "Nothing else to do." }
+exit 0

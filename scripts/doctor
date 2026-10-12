@@ -31,7 +31,7 @@ origin() {
 
 # ---- is anything shared at all? ----
 if [ ! -s "$STATE" ]; then
-  say bad "No folders" "Nothing is shared yet. Add your folders to docker-compose.override.yml (or run windows\\setup.ps1, or on Linux: sudo sh linux/setup.sh), then: docker compose up -d"
+  say bad "No folders" "Nothing is shared yet. Add your folders to docker-compose.override.yml (or run .\\rar2fs.ps1 setup, or on Linux: sudo sh linux/setup.sh), then: docker compose up -d"
 fi
 
 # ---- every source folder: readable, and not empty ----

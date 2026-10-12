@@ -100,7 +100,7 @@ else
   echo '<p><span class="badge ok">all good</span> Nothing looks wrong from inside the container.</p>'
 fi
 passed=$(grep "^ok$TAB" /state/doctor.tsv 2>/dev/null | cut -f2 | esc | sed 's/$/ · /' | tr -d '\n' | sed 's/ · $//')
-echo "<p class=\"sub\" style=\"margin:10px 0 0\">$( [ -n "$passed" ] && printf 'Passed: %s. ' "$passed")On a Windows PC, <code>windows/doctor.ps1</code> also checks your compose files and the drive.</p></section>"
+echo "<p class=\"sub\" style=\"margin:10px 0 0\">$( [ -n "$passed" ] && printf 'Passed: %s. ' "$passed")On a Windows PC, <code>rar2fs.ps1 doctor</code> also checks your compose files and the drive.</p></section>"
 
 library-html 2>/dev/null       # overview, recently added, duplicates
 

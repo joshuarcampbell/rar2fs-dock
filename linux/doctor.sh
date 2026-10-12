@@ -10,7 +10,7 @@
 # libraries use the mounts.
 # Exit code: 0 if no problems were found, 1 if there were.
 #
-# (The Windows PC that runs the container has its own: windows\doctor.ps1.)
+# (The Windows PC that runs the container has its own: .\rar2fs.ps1 doctor.)
 CONF_DIR=${RAR2FS_CONF_DIR:-/etc/rar2fs}                 # the overrides are for testing
 UNIT=${RAR2FS_UNIT:-/etc/systemd/system/rar2fs@.service}
 here=$(cd "$(dirname "$0")" && pwd)

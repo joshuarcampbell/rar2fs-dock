@@ -52,18 +52,18 @@ try { $reached = $client.BeginConnect($address.Host, $address.Port, $null, $null
 $client.Close()
 if (-not $reached) {
     Stop-Setup ("Nothing answers at $($address.Host) port $($address.Port). Check that the server PC is on, that Docker Desktop is running " +
-        "there, and that its firewall rule exists (on the server PC: .\windows\connect-plex.ps1 adds it).")
+        "there, and that its firewall rule exists (on the server PC: .\rar2fs.ps1 connect-plex adds it).")
 }
 Note "$($address.Host) answers."
 
 Step "Mounting $Drive"
-& (Join-Path $PSScriptRoot "uninstall-autostart.ps1") | Out-Null
+# (autostart.ps1 takes the old mount away first, by itself)
 Start-Sleep -Seconds 2
 if (Test-Path "$Drive\") {
     Stop-Setup ("$Drive is already used by something else on this PC. On the server PC, run " +
-        ".\windows\connect-plex.ps1 -Drive X: (with a letter that is free here) to make a new folder for this PC.")
+        ".\rar2fs.ps1 connect-plex -Drive X: (with a letter that is free here) to make a new folder for this PC.")
 }
-& (Join-Path $PSScriptRoot "install-autostart.ps1") -Drive $Drive -Url $Url | Out-Null
+& (Join-Path $PSScriptRoot "autostart.ps1") -Drive $Drive -Url $Url | Out-Null
 $deadline = (Get-Date).AddSeconds(90)
 while (-not (Test-Path "$Drive\") -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
 if (-not (Test-Path "$Drive\")) {
@@ -82,4 +82,5 @@ foreach ($name in $names) { Note "       $Drive\$name" }
 Note "3. Scan the libraries. The first scan is slower than on a normal disk."
 Note ""
 Note "Plex has to run as the Windows user you are logged in as now - the normal installation"
-Note "does. To remove the drive again: .\windows\uninstall-autostart.ps1"
+Note "does. To remove the drive again: .\windows\autostart.ps1 -Remove"
+exit 0

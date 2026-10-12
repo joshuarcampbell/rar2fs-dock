@@ -1,5 +1,5 @@
 # Adds (or replaces) an extra login in config\users.htpasswd and restarts the container.
-#   .\windows\add-user.ps1 -Name plex -Pass 'some-password'
+#   .\rar2fs.ps1 add-user plex 'some-password'
 # To remove a login, delete its line from config\users.htpasswd and run: docker compose restart
 param(
     [Parameter(Mandatory)][string]$Name,
@@ -27,3 +27,4 @@ if (-not (& (Join-Path $PSScriptRoot "in-use.ps1") -AskBefore "Restarting the co
 }
 docker compose --project-directory $repo restart | Out-Null
 Write-Host "Login '$Name' added. Remove it by deleting its line from config\users.htpasswd."
+exit 0

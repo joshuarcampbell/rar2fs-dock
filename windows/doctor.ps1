@@ -1,6 +1,6 @@
 # Checks your setup and says, in plain words, what is wrong and how to fix it.
 #
-#     .\windows\doctor.ps1
+#     .\rar2fs.ps1 doctor
 #
 # It reads .env and the compose files, looks at the folders and network shares they name,
 # asks the running container what it sees, and checks the drive. Nothing is changed.
@@ -56,7 +56,7 @@ Say ok "Docker" "running"
 # ---- .env ----
 $envFile = Join-Path $repo ".env"
 if (-not (Test-Path $envFile)) {
-    Say bad ".env" "There is no .env file, so there is no login. Run .\windows\setup.ps1, or copy .env.example to .env and set a password."
+    Say bad ".env" "There is no .env file, so there is no login. Run .\rar2fs.ps1 setup, or copy .env.example to .env and set a password."
 } else {
     $envText = Get-Content $envFile
     $user = [bool]($envText | Where-Object { $_ -match '^\s*WEBDAV_USER\s*=\s*\S' })
@@ -67,7 +67,7 @@ if (-not (Test-Path $envFile)) {
 
 # ---- the compose files ----
 if (-not (Test-Path (Join-Path $repo "docker-compose.override.yml"))) {
-    Say bad "Your folders" "There is no docker-compose.override.yml, so no folders are shared. Run .\windows\setup.ps1, or copy docker-compose.override.example.yml and edit it."
+    Say bad "Your folders" "There is no docker-compose.override.yml, so no folders are shared. Run .\rar2fs.ps1 setup, or copy docker-compose.override.example.yml and edit it."
 }
 $json = Docker-Out compose config --format json
 if ($script:failed) {
@@ -209,10 +209,10 @@ if ($script:failed) {
 # ---- the drive ----
 $task = Get-ScheduledTask -TaskName "rar2fs-dock mount" -ErrorAction SilentlyContinue
 if (-not $task) {
-    Say warn "Drive" "It isn't set up to appear when you log in. Run .\windows\install-autostart.ps1 (or .\windows\mount.ps1 to mount it just for now)."
+    Say warn "Drive" "It isn't set up to appear when you log in. Run .\rar2fs.ps1 autostart (or .\rar2fs.ps1 mount to mount it just for now)."
 } elseif ($task.Actions.Arguments -match '-Drive ([A-Za-z]:)') {
     $letter = $Matches[1].ToUpper()
     if (Test-Path "$letter\") { Say ok "Drive" "$letter is mounted" }
-    else { Say warn "Drive" "$letter isn't mounted right now. Use 'Remount drive' on the tray icon, or run .\windows\install-autostart.ps1 again." }
+    else { Say warn "Drive" "$letter isn't mounted right now. Use 'Remount drive' on the tray icon, or run .\rar2fs.ps1 autostart again." }
 }
 Finish

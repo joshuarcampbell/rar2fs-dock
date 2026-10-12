@@ -1,11 +1,11 @@
 # Changes how much of the processor the container may use - while it runs, with no
 # restart and nothing interrupted. Handy during a big library scan.
 #
-#     .\windows\limit.ps1                 show the limit now
-#     .\windows\limit.ps1 -Cpu 4          at most 4 processor cores
-#     .\windows\limit.ps1 -Cpu half       half of what Docker has (also: quarter)
-#     .\windows\limit.ps1 -Cpu none       no limit
-#     .\windows\limit.ps1 -Cpu 2 -NoSave  only until the next restart
+#     .\rar2fs.ps1 limit                 show the limit now
+#     .\rar2fs.ps1 limit 4          at most 4 processor cores
+#     .\rar2fs.ps1 limit half       half of what Docker has (also: quarter)
+#     .\rar2fs.ps1 limit none       no limit
+#     .\rar2fs.ps1 limit 2 -NoSave  only until the next restart
 #
 # The change takes effect at once. It is also written to .env as CPU_LIMIT, so it is
 # still there after a restart (not with -NoSave). The tray icon's menu does the same.
@@ -39,7 +39,7 @@ function Format-Limit([double]$value) {
 
 if (-not $Cpu) {
     Write-Host "Processor limit now: $(Format-Limit $current)"
-    Write-Host "Change it with:  .\windows\limit.ps1 -Cpu <cores | half | quarter | none>"
+    Write-Host "Change it with:  .\rar2fs.ps1 limit <cores | half | quarter | none>"
     exit 0
 }
 
@@ -83,3 +83,4 @@ while ($kept.Count -gt 0 -and $kept[$kept.Count - 1] -eq "") { $kept.RemoveAt($k
 if ($wanted -gt 0 -and -not $placed) { $kept.Add(""); $kept.Add($note); $kept.Add($value) }
 [IO.File]::WriteAllText($envFile, (($kept -join "`n") + "`n"), $utf8)
 Write-Host "Saved in .env, so it stays after a restart."
+exit 0

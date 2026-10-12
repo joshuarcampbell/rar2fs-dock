@@ -1,7 +1,7 @@
 # Connects a Plex server on ANOTHER Windows PC to this PC's rar2fs-dock. Run it here, on
 # the PC with the container; setup.ps1 offers to at the end.
 #
-#     .\windows\connect-plex.ps1
+#     .\rar2fs.ps1 connect-plex
 #
 # It asks for the Plex PC's address, then:
 #   1. lets other devices reach this PC: .env (BIND, TLS_HOSTS) and the firewall rule
@@ -15,9 +15,9 @@
 # Nothing can install the drive on the Plex PC from here - Windows doesn't accept that
 # from another PC - which is why step 5 ends with something for you to do.
 #
-#     .\windows\connect-plex.ps1 -PlexHost 192.168.1.20 -Drive P:
-#     .\windows\connect-plex.ps1 -PlexHost 192.168.1.20 -CopyTo \\192.168.1.20\Shared
-#     .\windows\connect-plex.ps1 -PlexHost 192.168.1.20 -DryRun     # change nothing, show what it would do
+#     .\rar2fs.ps1 connect-plex 192.168.1.20 -Drive P:
+#     .\rar2fs.ps1 connect-plex 192.168.1.20 -CopyTo \\192.168.1.20\Shared
+#     .\rar2fs.ps1 connect-plex 192.168.1.20 -DryRun     # change nothing, show what it would do
 param(
     [string]$PlexHost = "",      # the Plex PC's IP address or name
     [string]$Drive = "Y:",       # the letter the drive gets on the Plex PC
@@ -80,13 +80,13 @@ if ($DryRun) { Write-Host "DRY RUN: nothing on this PC or in Plex is changed." -
 
 # ---------------------------------------------------------------- this PC
 Step "Checking this PC"
-if (-not (Test-Path $envFile)) { Stop-Setup "There is no .env yet. Run .\windows\setup.ps1 first." }
+if (-not (Test-Path $envFile)) { Stop-Setup "There is no .env yet. Run .\rar2fs.ps1 setup first." }
 $running = Invoke-Docker inspect --format '{{.State.Running}}' rar2fs
-if ("$running" -ne "true") { Stop-Setup "The rar2fs container isn't running. Run .\windows\setup.ps1 (or: docker compose up -d) first." }
+if ("$running" -ne "true") { Stop-Setup "The rar2fs container isn't running. Run .\rar2fs.ps1 setup (or: docker compose up -d) first." }
 $envLines = [string[]][IO.File]::ReadAllLines($envFile)
 $original = $envLines -join "`n"
 $folders = @(Invoke-Docker exec rar2fs cut -f1 /tmp/folders.state | Where-Object { $_ })
-if (-not $folders) { Stop-Setup "The container isn't sharing any folders yet. Add some first (see .\windows\doctor.ps1)." }
+if (-not $folders) { Stop-Setup "The container isn't sharing any folders yet. Add some first (see .\rar2fs.ps1 doctor)." }
 Note "The container is running and shares: $($folders -join ', ')"
 # this ends with a restart of the container, so say now if that would interrupt someone
 if (-not $DryRun -and -not (& (Join-Path $PSScriptRoot "in-use.ps1") -AskBefore "Connecting the Plex PC restarts the container, which")) {
@@ -270,7 +270,7 @@ $port = if ((Get-EnvValue $envLines "SHORT_PATHS") -eq "1") { 8767 } else { 8765
 $serverUrl = "${scheme}://${thisPc}:$port"
 $stage = Join-Path ([IO.Path]::GetTempPath()) ("rar2fs-dock-plex-" + [Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path (Join-Path $stage "windows") | Out-Null
-foreach ($name in "mount.ps1", "install-autostart.ps1", "uninstall-autostart.ps1", "client-setup.ps1") {
+foreach ($name in "mount.ps1", "autostart.ps1", "client-setup.ps1") {
     Copy-Item (Join-Path $PSScriptRoot $name) (Join-Path $stage "windows")
 }
 if ($tlsOn) {
@@ -303,7 +303,7 @@ $readme = @(
     "",
     "Server: $serverUrl   (the PC at $thisPc has to be on, with Docker Desktop running)",
     "Keep this folder: the drive uses the scripts and the login in it.",
-    "To remove the drive: windows\uninstall-autostart.ps1"
+    "To remove the drive, in PowerShell in this folder: .\windows\autostart.ps1 -Remove"
 )
 [IO.File]::WriteAllText((Join-Path $stage "READ-ME.txt"), (($readme -join "`r`n") + "`r`n"), [Text.Encoding]::ASCII)
 Note "Scripts, certificate, the login and a Setup.cmd for $serverUrl."
@@ -383,4 +383,5 @@ if (-not $plexReady) {
     Note "Plex's trash setting is done, and Plex is told about new files as they arrive."
 }
 Note ""
-Note "The same steps are in READ-ME.txt in the folder. To check this PC's side: .\windows\doctor.ps1"
+Note "The same steps are in READ-ME.txt in the folder. To check this PC's side: .\rar2fs.ps1 doctor"
+exit 0

@@ -1,6 +1,13 @@
 # Mounts the rar2fs container's WebDAV view as a Windows drive letter using rclone + WinFsp.
 # Runs in the foreground; close the window (or Ctrl+C) to unmount.
 #
+#     .\rar2fs.ps1 mount              mount as Y:
+#     .\rar2fs.ps1 mount X:           on another letter
+#     .\rar2fs.ps1 autostart          the lasting way: in the background, at every login
+#
+# On another PC (one without the container) there is no rar2fs.ps1; run this file itself:
+#     .\windows\mount.ps1 -Url https://192.168.1.10:8765
+#
 # It waits until the server answers before the drive letter appears. After a restart,
 # Windows logs in before Docker is ready; without the wait, programs that start at
 # login (Plex, for one) would find an empty drive.
@@ -33,7 +40,7 @@ $running = Get-CimInstance Win32_Process -Filter "Name = 'rclone.exe'" |
     Where-Object { $_.CommandLine -like "*:webdav:*" }
 if ($running) {
     Write-Warning ("A rar2fs drive is already mounted (probably by the login task). To switch " +
-        "letters, run .\windows\uninstall-autostart.ps1 then .\windows\install-autostart.ps1 -Drive $Drive")
+        "letters, run .\rar2fs.ps1 autostart $Drive  (on a PC with only the windows folder: .\windows\autostart.ps1 -Drive $Drive -Url <address>)")
 }
 
 # Settings shared with the container (..\.env): login, HTTPS, and the short-names view

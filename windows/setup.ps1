@@ -6,14 +6,14 @@
 #   5. mounts the drive and makes it come back at every login
 #
 # Run it from a normal (non-admin) PowerShell, in the repo folder:
-#     .\windows\setup.ps1
+#     .\rar2fs.ps1 setup
 #
 # It never overwrites an existing .env or docker-compose.override.yml (use -Force for
 # the folder list), so it is safe to run again - for instance to finish after a step
 # failed, or to rebuild after pulling an update.
 #
 # Without questions:
-#     .\windows\setup.ps1 -Yes -Folder "D:\Movies=movies","E:\TV=tv" -Drive R:
+#     .\rar2fs.ps1 setup -Yes -Folder "D:\Movies=movies","E:\TV=tv" -Drive R:
 param(
     [string[]]$Folder = @(),   # "path=name" pairs; the same name twice merges those folders
     [string]$Drive = "",       # drive letter to mount on, e.g. R:  (default: first free one)
@@ -229,7 +229,7 @@ if ($writeOverride) {
             "",
             "# Network shares. The login comes from NAS_USER / NAS_PASS in .env. Docker keeps",
             "# using a share's old `"device`" or login after you change it, until its volume is",
-            "# removed: run .\windows\doctor.ps1, which spots that and prints the commands.",
+            "# removed: run .\rar2fs.ps1 doctor, which spots that and prints the commands.",
             "x-nas-options: &nas-options",
             "  type: cifs",
             '  o: "username=${NAS_USER:?set NAS_USER in .env},password=${NAS_PASS:?set NAS_PASS in .env},vers=3.0,iocharset=utf8,ro,uid=1000,gid=1000"',
@@ -320,18 +320,17 @@ if (-not $NoMount) {
         $Drive = (Ask "Drive letter to use" "${free}:")
     }
     $Drive = $Drive.Substring(0, 1).ToUpper() + ":"
-    & (Join-Path $PSScriptRoot "uninstall-autostart.ps1") | Out-Null
-    & (Join-Path $PSScriptRoot "install-autostart.ps1") -Drive $Drive | Out-Null
+    & (Join-Path $PSScriptRoot "autostart.ps1") -Drive $Drive | Out-Null      # replaces an earlier mount
     $deadline = (Get-Date).AddSeconds(90)
     while (-not (Test-Path "$Drive\") -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
     if (Test-Path "$Drive\") { $mountedOn = $Drive; Note "$Drive is mounted and will come back at every login." }
-    else { Note "The drive hasn't appeared yet. Try: .\windows\mount.ps1 -Drive $Drive   to see why." }
+    else { Note "The drive hasn't appeared yet. Try: .\rar2fs.ps1 mount $Drive   to see why." }
 }
 
 # ---------------------------------------------------------------- tray icon
 if (-not $NoMount -and -not $NoTray) {
     if (AskYesNo "Add a tray icon that shows whether it's healthy (a coloured dot next to the clock)?" $true) {
-        & (Join-Path $PSScriptRoot "install-tray.ps1") | Out-Null
+        & (Join-Path $PSScriptRoot "tray.ps1") -Install | Out-Null
         Note "The tray icon is running and will start at every login."
     }
 }
@@ -352,7 +351,7 @@ if ($scheme -eq "https") { Note "                (your browser will warn about t
 Note ""
 Note "Using Plex on this PC? Add the folders from $(if ($mountedOn) { $mountedOn } else { 'the drive' }) to your libraries, and turn off"
 Note "'Empty trash automatically after every scan' first. See the README, 'Plex on the same Windows PC'."
-Note "Plex on another Windows PC? Run .\windows\connect-plex.ps1 any time."
+Note "Plex on another Windows PC? Run .\rar2fs.ps1 connect-plex any time."
 if (Get-EnvValue "TLS_HOSTS") {
     Note ""
     Note "For other devices, allow the ports through Windows Firewall once (admin PowerShell):"
@@ -361,4 +360,5 @@ if (Get-EnvValue "TLS_HOSTS") {
 }
 Note ""
 Note "To change the folders later, edit docker-compose.override.yml and run: docker compose up -d"
-Note "To update to a newer version: .\windows\update.ps1     To save your setup: .\windows\backup.ps1"
+Note "To update to a newer version: .\rar2fs.ps1 update     To save your setup: .\rar2fs.ps1 backup"
+exit 0

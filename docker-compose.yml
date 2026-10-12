@@ -115,7 +115,7 @@ services:
       # HTTPS certificate (created on first start; not used when TLS=0)
       - "./tls:/tls"
       # Your media folders are not listed here. They go in docker-compose.override.yml,
-      # which Docker merges with this file automatically. Run windows\setup.ps1 to
+      # which Docker merges with this file automatically. Run .\rar2fs.ps1 setup to
       # create it, or copy docker-compose.override.example.yml and edit it.
 
 volumes:

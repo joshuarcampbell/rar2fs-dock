@@ -3,3 +3,4 @@
 scripts/* text eol=lf
 linux/** text eol=lf
 entrypoint.sh text eol=lf
+*.cmd text eol=crlf

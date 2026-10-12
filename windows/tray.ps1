@@ -5,11 +5,48 @@
 #   red     unhealthy          grey    not answering (Docker Desktop not running?)
 #
 # It asks the status page every 30 seconds and shows a notification when the state
-# changes. Start it at every login with .\windows\install-tray.ps1.
+# changes.
 #
-#     .\windows\tray.ps1          run it now (closes with the window, or via its Exit item)
-#     .\windows\tray.ps1 -Once    print the current state and exit
-param([switch]$Once)
+#     .\rar2fs.ps1 tray on        start it now and at every login
+#     .\rar2fs.ps1 tray off       stop it, and don't start it at login
+#     .\rar2fs.ps1 tray status    print the current state and exit
+#     .\rar2fs.ps1 tray           run it in this window (closes with the window, or via Exit)
+#
+# "on" puts a shortcut to this file in your Startup folder; "off" removes it.
+param(
+    [switch]$Install,    # tray on
+    [switch]$Remove,     # tray off
+    [switch]$Once        # tray status
+)
+
+$shortcutPath = Join-Path ([Environment]::GetFolderPath('Startup')) "rar2fs-dock tray.lnk"
+# stop a tray icon that is already running (not this window)
+function Stop-Tray {
+    Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" |
+        Where-Object { $_.CommandLine -like "*tray.ps1*" -and $_.CommandLine -notlike "*-Install*" -and $_.ProcessId -ne $PID } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
+if ($Remove) {
+    if (Test-Path -LiteralPath $shortcutPath) { [IO.File]::Delete($shortcutPath) }
+    Stop-Tray
+    Write-Host "The tray icon is stopped and won't start at login."
+    exit 0
+}
+if ($Install) {
+    $arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$PSCommandPath`""
+    $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)
+    $shortcut.TargetPath = (Get-Command powershell.exe).Source
+    $shortcut.Arguments = $arguments
+    $shortcut.WorkingDirectory = Split-Path $PSScriptRoot -Parent
+    $shortcut.WindowStyle = 7        # minimised: no window flashes up at login
+    $shortcut.Description = "rar2fs-dock tray icon"
+    $shortcut.Save()
+    Stop-Tray                        # so that a newer version of this file takes over
+    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList $arguments
+    Write-Host "The tray icon is running and will start at every login."
+    Write-Host "Look for a coloured dot next to the clock (it may be behind the ^ arrow)."
+    exit 0
+}
 
 $repo = Split-Path $PSScriptRoot -Parent
 
@@ -273,7 +310,7 @@ $openDrive.add_Click({
 $remount.add_Click({
     $mount = Get-MountArgs
     if (-not $mount.Args) { $mount.Args = "" }
-    $command = "& '$PSScriptRoot\uninstall-autostart.ps1'; & '$PSScriptRoot\install-autostart.ps1' $($mount.Args)"
+    $command = "& '$PSScriptRoot\autostart.ps1' $($mount.Args)"       # takes the old mount away first
     Start-Process powershell.exe -WindowStyle Hidden -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $command
     $tray.ShowBalloonTip(4000, "rar2fs-dock", "Remounting the drive...", [System.Windows.Forms.ToolTipIcon]::Info)
 })

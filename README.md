@@ -42,7 +42,7 @@ After installing rclone, open a **new** PowerShell window so it's on your PATH.
 Install Docker Desktop and start it, then open PowerShell in this folder and run:
 
 ```powershell
-.\windows\setup.ps1
+.\rar2fs.ps1 setup
 ```
 
 It does the rest:
@@ -66,11 +66,38 @@ list unless you add `-Force`. Everything can also be given up front, with no
 questions:
 
 ```powershell
-.\windows\setup.ps1 -Yes -Folder "D:\Movies=movies","E:\TV=tv" -Drive R:
+.\rar2fs.ps1 setup -Yes -Folder "D:\Movies=movies","E:\TV=tv" -Drive R:
 ```
 
-If PowerShell refuses to run the script, run this first:
-`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
+If PowerShell refuses to run the script, either use `rar2fs.cmd` instead
+(`.\rar2fs.cmd setup` - it works the same from PowerShell or a Command Prompt), or
+allow scripts once with `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+
+**One command for everything.** `rar2fs.ps1` is the only command you need on this PC.
+Run it with no words after it to see what it can do, and `.\rar2fs.ps1 help <command>`
+for the details of one:
+
+| Command | What it does |
+|---|---|
+| `setup` | Set everything up, or finish or repair a setup |
+| `update` | Get the newest version, rebuild and restart |
+| `doctor` | Check the setup and say what is wrong and how to fix it |
+| `status` | Say in one line whether it is healthy |
+| `in-use` | Show what is being read from the drive right now |
+| `limit 4` \| `half` \| `none` | Show or change how much processor it may use |
+| `mount [X:]` | Mount the drive in this window, until the window closes |
+| `autostart [X:]`, `autostart off` | Mount the drive now and at every login, or stop that |
+| `tray on` \| `off` | The tray icon |
+| `folders`, `add-folder <path> [name]`, `remove-folder <name>` | Folders added without a restart |
+| `add-user <name> <password>` | Give another person or device its own login |
+| `connect-plex [address]` | Set up Plex on another Windows PC |
+| `backup [folder]`, `restore <zip>` | Save your setup to a zip, or put one back |
+
+Anything starting with `-` is passed on as an option (`.\rar2fs.ps1 setup -Yes`). The
+work is done by scripts in the `windows\` folder, which you don't need to run yourself.
+Coming from an earlier version? The old script names
+(`windows\install-autostart.ps1` and the rest) still work for now and pass straight
+on to the new ones.
 
 The numbered steps below do the same thing by hand, and explain each part.
 
@@ -151,7 +178,7 @@ docker compose up -d
 ```
 
 The first part of the volume's name is this folder's name; `docker volume ls` lists
-them. `.\windows\doctor.ps1` notices a share in this state and prints the exact
+them. `.\rar2fs.ps1 doctor` notices a share in this state and prints the exact
 commands. Don't use `docker compose down -v` for this: it also deletes the container's
 saved history (events, health report, library index).
 
@@ -189,25 +216,26 @@ made the certificate itself (see [HTTPS](#https)). Choose *Advanced* → *Procee
 **Try it once (stays mounted while the window is open):**
 
 ```powershell
-.\windows\mount.ps1
+.\rar2fs.ps1 mount
 ```
 
 **Mount automatically at every login (recommended):**
 
 ```powershell
-.\windows\install-autostart.ps1
+.\rar2fs.ps1 autostart
 ```
 
-Both accept `-Drive X:` to use a different letter. `Y:` is the default. They log in
+Both take a drive letter to use a different one (`.\rar2fs.ps1 autostart X:`). `Y:` is
+the default. They log in
 with the user and password from `.env` automatically.
 
 The drive letter only appears once the container is answering. After a restart Windows
 logs in before Docker is ready, and this way programs that start at login - Plex, for
-one - never find an empty drive. If the drive doesn't appear, run `.\windows\mount.ps1`
+one - never find an empty drive. If the drive doesn't appear, run `.\rar2fs.ps1 mount`
 in a window to see what it's waiting for.
 
-If PowerShell refuses to run the scripts, run this first:
-`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
+If PowerShell refuses to run the scripts, use `rar2fs.cmd` in place of `rar2fs.ps1`, or
+run this first: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
 
 That's it - open `Y:\` in Explorer.
 
@@ -273,7 +301,7 @@ network side is done. If it doesn't, see
 
 ### Connecting another Windows PC
 
-If that PC runs Plex, `.\windows\connect-plex.ps1` on the server PC does these steps
+If that PC runs Plex, `.\rar2fs.ps1 connect-plex` on the server PC does these steps
 for you - see [Plex on another Windows PC](#plex-on-another-windows-pc).
 
 To do it by hand, work on the other PC. It doesn't need Docker or a copy of your
@@ -318,11 +346,11 @@ window is open; close the window to disconnect. Add `-Drive X:` for another lett
 **5. Make it permanent.** Once that works, close the window and run:
 
 ```powershell
-.\windows\install-autostart.ps1 -Url https://192.168.1.10:8765
+.\windows\autostart.ps1 -Url https://192.168.1.10:8765
 ```
 
 The drive now comes back at every login. Remove it with
-`.\windows\uninstall-autostart.ps1`.
+`.\windows\autostart.ps1 -Remove`.
 
 Things to know:
 
@@ -332,9 +360,10 @@ Things to know:
   letter waits and appears by itself once the server answers again.
 - **If the certificate on the server PC is ever recreated** (after changing
   `TLS_HOSTS`, for example), copy the new `tls\cert.pem` over again.
-- **Every other script is for the server PC only** - the tray icon, `doctor.ps1`,
-  `update.ps1`, `add-folder.ps1`, the backup scripts and the rest. On the other PC you
-  only need `mount.ps1`, `install-autostart.ps1` and `uninstall-autostart.ps1`.
+- **The `rar2fs.ps1` command is for the server PC only,** as is everything it does
+  (doctor, update, the tray icon, backups and the rest). The other PC has just the
+  `windows` folder, and in it only needs `mount.ps1` and `autostart.ps1`, run directly
+  as shown above.
 - **If PowerShell refuses to run the scripts,** run this first:
   `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
 
@@ -356,9 +385,9 @@ Things to know:
 | *The server ... rejected the login* | The user or password in the other PC's `.env` isn't one the server accepts. Compare it with the server PC's `.env`, or with the login you made for this PC. |
 | *rclone not found* | Open a new PowerShell window after installing rclone. |
 | *Y: is already in use* | Pick another letter: add `-Drive X:`. |
-| It worked, then stopped after a change on the server PC | Changing `TLS`, `TLS_HOSTS` or `SHORT_PATHS` there changes the address or the certificate. Copy the new `tls\cert.pem`, then run `uninstall-autostart.ps1` and `install-autostart.ps1` again with the right address. |
+| It worked, then stopped after a change on the server PC | Changing `TLS`, `TLS_HOSTS` or `SHORT_PATHS` there changes the address or the certificate. Copy the new `tls\cert.pem`, then run `.\windows\autostart.ps1 -Url <address>` again with the right address. |
 
-On the server PC, `.\windows\doctor.ps1` checks the container side for you (see
+On the server PC, `.\rar2fs.ps1 doctor` checks the container side for you (see
 [Setup check](#setup-check)).
 
 ## Plex on the same Windows PC
@@ -403,7 +432,7 @@ the server PC does nearly all of it. The setup wizard offers to run it at the en
 run it yourself any time:
 
 ```powershell
-.\windows\connect-plex.ps1
+.\rar2fs.ps1 connect-plex
 ```
 
 It asks for the Plex PC's IP address or name, then:
@@ -792,17 +821,17 @@ step were not part of that run.
 | Check your folders for problems | The **Run health report** button on that page |
 | See container logs | `docker logs rar2fs` |
 | Stop everything | `docker compose down` |
-| Remove the auto-mount | `.\windows\uninstall-autostart.ps1` |
-| Change the drive letter | `.\windows\uninstall-autostart.ps1`, then `.\windows\install-autostart.ps1 -Drive X:` |
+| Remove the auto-mount | `.\rar2fs.ps1 autostart off` |
+| Change the drive letter | `.\rar2fs.ps1 autostart X:` |
 | Find something, see what's new, spot duplicates | The [status page](#the-library-search-recently-added-duplicates-sizes) |
-| Add a folder without a restart | `.\windows\add-folder.ps1 -Path E:\Concerts` - see [Adding folders without a restart](#adding-folders-without-a-restart) |
-| Update to a newer version | `.\windows\update.ps1` - see [Updating](#updating) |
-| Connect Plex on another Windows PC | `.\windows\connect-plex.ps1` - see [Plex on another Windows PC](#plex-on-another-windows-pc) |
-| Find out why something isn't working | `.\windows\doctor.ps1` - see [Setup check](#setup-check) |
-| See whether anyone is watching right now | `.\windows\in-use.ps1`, or *In use now* on the status page - see [What's in use](#whats-in-use-and-restart-warnings) |
-| Stop a scan from slowing the PC down | `.\windows\limit.ps1 -Cpu half`, or *Processor limit* on the tray icon - see [If the PC slows down during scans](#if-the-pc-slows-down-during-scans) |
+| Add a folder without a restart | `.\rar2fs.ps1 add-folder E:\Concerts` - see [Adding folders without a restart](#adding-folders-without-a-restart) |
+| Update to a newer version | `.\rar2fs.ps1 update` - see [Updating](#updating) |
+| Connect Plex on another Windows PC | `.\rar2fs.ps1 connect-plex` - see [Plex on another Windows PC](#plex-on-another-windows-pc) |
+| Find out why something isn't working | `.\rar2fs.ps1 doctor` - see [Setup check](#setup-check) |
+| See whether anyone is watching right now | `.\rar2fs.ps1 in-use`, or *In use now* on the status page - see [What's in use](#whats-in-use-and-restart-warnings) |
+| Stop a scan from slowing the PC down | `.\rar2fs.ps1 limit half`, or *Processor limit* on the tray icon - see [If the PC slows down during scans](#if-the-pc-slows-down-during-scans) |
 | Give an encrypted archive its password | `config\passwords.conf` - see [Password-protected archives](#password-protected-archives) |
-| Save your setup, or move it to another PC | `.\windows\backup.ps1` - see [Backup and restore](#backup-and-restore) |
+| Save your setup, or move it to another PC | `.\rar2fs.ps1 backup` - see [Backup and restore](#backup-and-restore) |
 | See at a glance whether it's healthy | The [tray icon](#tray-icon) |
 
 The container answers on three ports, all with the same logins:
@@ -853,12 +882,12 @@ server in the middle of a library scan shows up there with hundreds of listings 
 minute. Together they answer "is someone watching, or is Plex just scanning?".
 
 The same list protects you from cutting off a film. Before anything restarts the
-container - `update.ps1`, `add-user.ps1`, `connect-plex.ps1`, making a drive visible
-in `add-folder.ps1`, or *Restart container* on the tray icon - it checks, shows who is
+container - `rar2fs.ps1 update`, `rar2fs.ps1 add-user`, `rar2fs.ps1 connect-plex`, making a drive visible
+in `rar2fs.ps1 add-folder`, or *Restart container* on the tray icon - it checks, shows who is
 reading what, and asks first. To look yourself:
 
 ```powershell
-.\windows\in-use.ps1
+.\rar2fs.ps1 in-use
 ```
 
 Things to know:
@@ -880,7 +909,7 @@ When something isn't right - a folder is missing from the drive, a network share
 empty, the container won't start - run:
 
 ```powershell
-.\windows\doctor.ps1
+.\rar2fs.ps1 doctor
 ```
 
 It changes nothing. It reads `.env` and the compose files, looks at every folder and
@@ -1002,10 +1031,10 @@ which pauses the drive - and Plex - for a minute. To add a folder while it keeps
 running:
 
 ```powershell
-.\windows\add-folder.ps1 -Path E:\Concerts            # -> Y:\concerts
-.\windows\add-folder.ps1 -Path E:\More-TV -Name tv    # joins the existing tv folder
-.\windows\add-folder.ps1 -Remove concerts
-.\windows\add-folder.ps1 -List
+.\rar2fs.ps1 add-folder E:\Concerts            # -> Y:\concerts
+.\rar2fs.ps1 add-folder E:\More-TV -Name tv    # joins the existing tv folder
+.\rar2fs.ps1 remove-folder concerts
+.\rar2fs.ps1 folders
 ```
 
 Docker can't attach a new Windows folder to a container that is already running, so
@@ -1034,8 +1063,8 @@ for unhealthy, amber while starting, grey when the container isn't answering (Do
 Desktop not running, usually). A notification pops up when the state changes.
 
 ```powershell
-.\windows\install-tray.ps1       # start it now and at every login
-.\windows\uninstall-tray.ps1
+.\rar2fs.ps1 tray on       # start it now and at every login
+.\rar2fs.ps1 tray off
 ```
 
 Right-click it for: the current state, *Open status page*, *Open drive*, *Remount
@@ -1050,7 +1079,7 @@ next to the clock to keep it in view.
 ### Updating
 
 ```powershell
-.\windows\update.ps1
+.\rar2fs.ps1 update
 ```
 
 One command: it pulls the latest version, rebuilds and restarts the container, waits
@@ -1067,17 +1096,17 @@ the update can't overwrite them. Your old file is kept as
 ### Backup and restore
 
 ```powershell
-.\windows\backup.ps1                        # a zip in your Documents folder
-.\windows\backup.ps1 -To D:\Backups
-.\windows\restore.ps1 -File <the zip>
+.\rar2fs.ps1 backup                        # a zip in your Documents folder
+.\rar2fs.ps1 backup -To D:\Backups
+.\rar2fs.ps1 restore <the zip>
 ```
 
 The backup holds everything that is yours: `.env`, your folder list, extra logins,
 folders added without a restart, and the HTTPS certificate. It contains passwords and
 a private key, so keep it somewhere private.
 
-To move to another PC: clone the repo there, run `restore.ps1`, then
-`.\windows\setup.ps1`, which keeps the restored files and does the rest. Because the
+To move to another PC: clone the repo there, run `rar2fs.ps1 restore`, then
+`.\rar2fs.ps1 setup`, which keeps the restored files and does the rest. Because the
 certificate comes along, other devices keep working without being set up again -
 provided the new PC has the same address.
 
@@ -1231,15 +1260,15 @@ certificate. For plain HTTP, put this in `.env` and run `docker compose up -d`:
 TLS=0
 ```
 
-Addresses then start with `http://`. Re-run `.\windows\uninstall-autostart.ps1` and
-`.\windows\install-autostart.ps1` on this PC, and the Linux installer with the `http://`
+Addresses then start with `http://`. Run `.\rar2fs.ps1 autostart` again on this PC,
+and the Linux installer with the `http://`
 address on Linux machines. On a home network you trust this is a reasonable choice;
 anywhere else, keep HTTPS on.
 
 **Upgrading from a version where HTTPS was off by default:** every device has to
 switch at the same time. Set `TLS_HOSTS`, run `docker compose up -d`, then:
 
-1. **This PC:** `.\windows\uninstall-autostart.ps1` then `.\windows\install-autostart.ps1`.
+1. **This PC:** `.\rar2fs.ps1 autostart`.
 2. **Linux machines:** `sudo sh install.sh --url https://<this-PC's-IP>:8765 --user
    <user> --pass '<password>'`, then `sudo systemctl restart 'rar2fs@*'`.
 3. **Other Windows PCs:** copy the new `tls\cert.pem` over and use the `https://`
@@ -1281,13 +1310,12 @@ Put that in `.env`, then run `docker compose up -d`.
 **Using it:**
 
 - **This PC:** once `SHORT_PATHS=1` is in `.env`, the mount scripts use the short view
-  by themselves. Run `.\windows\uninstall-autostart.ps1` and then
-  `.\windows\install-autostart.ps1` to switch the drive over. Add `-Original` to keep the
-  full names on this PC.
+  by themselves. Run `.\rar2fs.ps1 autostart` again to switch the drive over. Add
+  `-Original` to keep the full names on this PC.
 - **Other Windows PCs:** use port 8767 in the address, e.g.
   `.\windows\mount.ps1 -Url https://<this-PC's-IP>:8767` (see
   [Connecting another Windows PC](#connecting-another-windows-pc)). It uses the same
-  certificate, login and guess-throttling as the normal drive. `connect-plex.ps1`
+  certificate, login and guess-throttling as the normal drive. `rar2fs.ps1 connect-plex`
   picks this port by itself when `SHORT_PATHS=1`.
 
 The limit is `MAX_PATH` in `.env`: 230 characters by default, counted from the
@@ -1354,7 +1382,7 @@ Put `HIDE=` (with nothing after it) in `.env` to show everything.
 The login in `.env` always works. To give another person or device its own login:
 
 ```powershell
-.\windows\add-user.ps1 -Name plex -Pass 'some-password'
+.\rar2fs.ps1 add-user plex 'some-password'
 ```
 
 Logins are stored (hashed) in `config\users.htpasswd`, which is gitignored. To revoke
@@ -1408,7 +1436,7 @@ Then run `docker compose up -d`.
   the container use `host.docker.internal`, not `localhost`.
 - **`PLEX_TOKEN`:** in Plex Web, open any item → **⋯** → *Get Info* → *View XML*. The
   token is the `X-Plex-Token=...` value at the end of the address bar.
-  (`connect-plex.ps1` fetches one for you.)
+  (`rar2fs.ps1 connect-plex` fetches one for you.)
 - **`JELLYFIN_API_KEY`:** Jellyfin → *Dashboard* → *API Keys* → **+**.
 - **`EMBY_API_KEY`:** Emby → *Settings* → *API Keys* → *New API Key*.
 - **The path map** (`..._PATH_MAP`): where each folder is on that server, as
@@ -1429,7 +1457,7 @@ Leave a server's token or key empty to turn it off.
 Plex is asked to scan one folder of one library. Jellyfin and Emby are told "this path
 changed" and work out the library themselves. The Jellyfin and Emby support has been
 tested against stand-in servers that record what they are sent, not yet against real
-ones - `.\windows\doctor.ps1` checks that yours accepts the address and key.
+ones - `.\rar2fs.ps1 doctor` checks that yours accepts the address and key.
 
 ### Password-protected archives
 
@@ -1509,7 +1537,7 @@ Three things have files of their own, all gitignored:
   [Password-protected archives](#password-protected-archives).
 
 **Coming from an older version?** Some of these used to be set by editing
-`docker-compose.yml`. If you changed that file, `update.ps1` will stop and say so:
+`docker-compose.yml`. If you changed that file, `rar2fs.ps1 update` will stop and say so:
 move your values into `.env` (the names are the same), then run
 `git checkout -- docker-compose.yml` and update again.
 
@@ -1530,10 +1558,10 @@ then `docker compose up -d`. Or change the processor limit **while it runs**, wi
 restart and nothing interrupted - useful in the middle of a scan:
 
 ```powershell
-.\windows\limit.ps1                 # show the limit now
-.\windows\limit.ps1 -Cpu 4          # at most 4 cores
-.\windows\limit.ps1 -Cpu half       # half of what Docker has (also: quarter)
-.\windows\limit.ps1 -Cpu none       # no limit
+.\rar2fs.ps1 limit            # show the limit now
+.\rar2fs.ps1 limit 4          # at most 4 cores
+.\rar2fs.ps1 limit half       # half of what Docker has (also: quarter)
+.\rar2fs.ps1 limit none       # no limit
 ```
 
 It takes effect at once and is saved to `.env` as `CPU_LIMIT`, so it's still there
@@ -1589,14 +1617,14 @@ say other devices will connect.
 
 ## Troubleshooting
 
-Start with `.\windows\doctor.ps1` - see [Setup check](#setup-check). It finds most of
+Start with `.\rar2fs.ps1 doctor` - see [Setup check](#setup-check). It finds most of
 the mistakes below by itself and says how to fix them.
 
 - **The PC becomes sluggish or locks up while a media server scans** - see
   [If the PC slows down during scans](#if-the-pc-slows-down-during-scans).
 - **The drive letter doesn't appear after logging in** - it waits for the container.
   Check that Docker Desktop is running (`docker ps`). Running
-  `.\windows\mount.ps1` in a window shows what it's waiting for.
+  `.\rar2fs.ps1 mount` in a window shows what it's waiting for.
 - **The drive is empty or shows an error** - the container stopped after the drive was
   mounted. Check `docker ps`; the drive recovers on its own once the container is up.
 - **A newly added folder is empty on the drive** - the drive caches folder listings for
@@ -1612,9 +1640,8 @@ the mistakes below by itself and says how to fix them.
   folder as *stopped*, the container will restart itself within a few minutes to bring
   it back; `docker compose restart` does it straight away.
 - **The drive stopped working after changing `TLS`, `TLS_HOSTS` or `SHORT_PATHS`** -
-  the login task remembers how it was set up. Run
-  `.\windows\uninstall-autostart.ps1` and then `.\windows\install-autostart.ps1` so it
-  picks up the new setting.
+  the login task remembers how it was set up. Run `.\rar2fs.ps1 autostart` again so
+  it picks up the new setting.
 - **The browser warns that the connection isn't private** - expected: the container
   made its own certificate. Choose *Advanced* → *Proceed*. A new warning appears
   whenever the certificate is recreated, for example after changing `TLS_HOSTS`.
@@ -1671,11 +1698,11 @@ the mistakes below by itself and says how to fix them.
   gitignored and are left out of the image
   when it is built (`.dockerignore`), but anyone who can read this folder can read
   them - as can anyone who gets hold of a [backup](#backup-and-restore) zip.
-- **A Plex token is powerful.** The one `connect-plex.ps1` fetches (or you paste) is
+- **A Plex token is powerful.** The one `rar2fs.ps1 connect-plex` fetches (or you paste) is
   your Plex account's token, not a limited one. It is only sent to your own Plex
   server, over your local network, to ask for scans. Plex's address in `PLEX_URL` is
   plain `http://`, so use it on a network you trust.
-- **The folder made for another PC** by `connect-plex.ps1` contains a login (its own,
+- **The folder made for another PC** by `rar2fs.ps1 connect-plex` contains a login (its own,
   separate from yours) in a small `.env`. `Setup.cmd` restricts that file to the user
   who runs it. To cut that PC off, delete the `plex:` line from
   `config\users.htpasswd` and run `docker compose restart`.
