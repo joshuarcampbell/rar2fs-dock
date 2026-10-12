@@ -1640,7 +1640,9 @@ the mistakes below by itself and says how to fix them.
   the small setuid `fusermount` helpers use `SYS_ADMIN`, and only to create the mounts.
   Every other program in the image that could raise its own privileges (`su`,
   `passwd`, `mount` and so on) has that ability removed. `PUID` can choose which
-  ordinary user that is; the container refuses to start as root.
+  ordinary user that is; the container refuses to start as root. (To let it run as
+  a user it has never heard of, the container may add a line to its own list of user
+  names. With those programs disarmed, nothing can use that list to gain anything.)
 - **Password required.** The server is open to your local network, so it always
   needs the login from `.env`. Compose refuses to start without one. Traffic is
   encrypted with [HTTPS](#https) unless you turn that off. Either way, don't expose

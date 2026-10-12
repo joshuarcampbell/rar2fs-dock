@@ -6,7 +6,7 @@
 title=$1; msg=$2
 mkdir -p /state
 printf '%s\t%s\t%s\n' "$(date +%s)" "$title" "$(printf '%s' "$msg" | tr '\n\t' '  ')" >> /state/events.log
-echo "notify: $title - $(printf '%s' "$msg" | head -1)"
+printf 'notify: %s - %s\n' "$title" "$(printf '%s' "$msg" | head -1)"
 [ -n "$NOTIFY_URL" ] || exit 0
 
 # The URL goes in a private config file (not the command line), since it can contain a secret.

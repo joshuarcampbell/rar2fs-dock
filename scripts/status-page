@@ -100,7 +100,7 @@ else
   echo '<p><span class="badge ok">all good</span> Nothing looks wrong from inside the container.</p>'
 fi
 passed=$(grep "^ok$TAB" /state/doctor.tsv 2>/dev/null | cut -f2 | esc | sed 's/$/ · /' | tr -d '\n' | sed 's/ · $//')
-echo "<p class=\"sub\" style=\"margin:10px 0 0\">$( [ -n "$passed" ] && printf 'Passed: %s. ' "$passed")For the checks that need your compose files, run <code>windows/doctor.ps1</code> on the PC.</p></section>"
+echo "<p class=\"sub\" style=\"margin:10px 0 0\">$( [ -n "$passed" ] && printf 'Passed: %s. ' "$passed")On a Windows PC, <code>windows/doctor.ps1</code> also checks your compose files and the drive.</p></section>"
 
 library-html 2>/dev/null       # overview, recently added, duplicates
 
@@ -203,9 +203,9 @@ setting AUTO_RESTART          "${AUTO_RESTART:-1}"            1          'Restar
 setting HEALTH_REPORT_DAYS    "${HEALTH_REPORT_DAYS:-7}"      7          'Days between scheduled health reports; 0 = never'
 setting PUID                  "$(id -u)"                      1000       'The user everything in the container runs as (Linux hosts: the owner of your folders)'
 setting PGID                  "$(id -g)"                      1000       'That user'"'"'s group'
-setting CPU_LIMIT           "${CPU_LIMIT:-0}"               0          'Most processor cores the container may use; 0 = no limit'
+setting CPU_LIMIT             "${CPU_LIMIT:-0}"               0          'Most processor cores the container may use; 0 = no limit'
 setting MEMORY_LIMIT          "${MEMORY_LIMIT:-0}"            0          'Most memory the container may use, e.g. 4g; 0 = no limit'
-setting LIBRARY_INDEX_MINUTES "${LIBRARY_INDEX_MINUTES:-10}"  10        'Minutes between rebuilds of the search and duplicates index'
+setting LIBRARY_INDEX_MINUTES "${LIBRARY_INDEX_MINUTES:-10}"  10         'Minutes between rebuilds of the search and duplicates index'
 setting NOTIFY_URL            "$(hidden "$NOTIFY_URL")"       ''         'Where alerts are sent'
 setting HEARTBEAT_URL         "$(hidden "$HEARTBEAT_URL")"    ''         'A URL pinged every minute while healthy'
 setting STATUS_TOKEN          "$(hidden "$STATUS_TOKEN")"     ''         'Read-only token for status.json, /metrics and the RSS feed'

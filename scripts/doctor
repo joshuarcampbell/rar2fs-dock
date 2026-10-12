@@ -10,6 +10,7 @@
 # It can only see what the container sees. The mistakes that live in the compose files
 # (a network share that is defined but never used, a Windows folder that doesn't exist)
 # are checked on the PC, by windows\doctor.ps1 - which also runs this and shows both.
+# (On a Linux host, linux/setup.sh prints what this finds when it finishes.)
 STATE=/tmp/folders.state
 EXPECTED=/tmp/mounts.expected
 full=0; [ "${1:-}" = "--full" ] && full=1
@@ -30,7 +31,7 @@ origin() {
 
 # ---- is anything shared at all? ----
 if [ ! -s "$STATE" ]; then
-  say bad "No folders" "Nothing is shared yet. Add your folders to docker-compose.override.yml (or run windows\\setup.ps1), then: docker compose up -d"
+  say bad "No folders" "Nothing is shared yet. Add your folders to docker-compose.override.yml (or run windows\\setup.ps1, or on Linux: sudo sh linux/setup.sh), then: docker compose up -d"
 fi
 
 # ---- every source folder: readable, and not empty ----
@@ -141,7 +142,7 @@ if [ -f /config/passwords.conf ]; then
   if [ -s /tmp/passwords.problems ]; then
     while IFS= read -r line; do say warn "passwords.conf" "$line"; done < /tmp/passwords.problems
   fi
-  n=$(grep -c '^\[' /tmp/rarconfig 2>/dev/null || echo 0)
-  [ "$n" -gt 0 ] && say ok "Archive passwords" "$n archive(s) have a password."
+  n=$(grep -c '^\[' /tmp/rarconfig 2>/dev/null)       # prints 0 by itself when there are none
+  [ "${n:-0}" -gt 0 ] && say ok "Archive passwords" "$n archive(s) have a password."
 fi
 exit 0

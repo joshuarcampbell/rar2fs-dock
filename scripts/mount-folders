@@ -32,7 +32,7 @@ MAP=/tmp/sources.map
 CONF=/config/folders.conf
 TAB=$(printf '\t')
 
-say() { echo "mount-folders: $*"; }
+say() { printf 'mount-folders: %s\n' "$*"; }
 
 # What should be mounted: one line per name, "name<TAB>member:member..."
 plan() {
@@ -77,21 +77,21 @@ write_rarconfig() {  # (searches the folders in /tmp/folders.plan for names with
   tr -d '\r' < "$PASSWORDS" | while IFS= read -r line; do
     line=$(printf '%s' "$line" | sed 's/^[[:space:]]*//')
     case "$line" in ''|'#'*) continue ;; esac
-    case "$line" in *=*) ;; *) echo "\"$line\" has no = in it - skipped" >> /tmp/passwords.problems; continue ;; esac
+    case "$line" in *=*) ;; *) printf '%s\n' "\"$line\" has no = in it - skipped" >> /tmp/passwords.problems; continue ;; esac
     pattern=$(printf '%s' "${line%%=*}" | sed 's/[[:space:]]*$//')
     password=$(printf '%s' "${line#*=}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-    [ -n "$pattern" ] && [ -n "$password" ] || { echo "\"$line\" needs a name and a password - skipped" >> /tmp/passwords.problems; continue; }
+    [ -n "$pattern" ] && [ -n "$password" ] || { printf '%s\n' "\"$line\" needs a name and a password - skipped" >> /tmp/passwords.problems; continue; }
     case "$pattern" in
-      */*) echo "\"$pattern\": give the file name only, without its folder - skipped" >> /tmp/passwords.problems; continue ;;
+      */*) printf '%s\n' "\"$pattern\": give the file name only, without its folder - skipped" >> /tmp/passwords.problems; continue ;;
       *'*'*|*'?'*)
         cut -f2 /tmp/folders.plan | tr ':' '\n' | while IFS= read -r member; do
           find "$member" -type f -iname '*.rar' -iname "$pattern" -printf '%f\n' 2>/dev/null
         done | sort -u > /tmp/passwords.names
-        [ -s /tmp/passwords.names ] || echo "\"$pattern\" matches no archive - check the name" >> /tmp/passwords.problems ;;
+        [ -s /tmp/passwords.names ] || printf '%s\n' "\"$pattern\" matches no archive - check the name" >> /tmp/passwords.problems ;;
       *) printf '%s\n' "$pattern" > /tmp/passwords.names ;;
     esac
     while IFS= read -r archive; do
-      case "$archive" in *']'*) echo "\"$archive\" has a ] in its name, which rar2fs can't take a password for" >> /tmp/passwords.problems; continue ;; esac
+      case "$archive" in *']'*) printf '%s\n' "\"$archive\" has a ] in its name, which rar2fs can't take a password for" >> /tmp/passwords.problems; continue ;; esac
       printf '[%s]\npassword = "%s"\n' "$archive" "$password" >> "$RARCONFIG"
     done < /tmp/passwords.names
   done

@@ -318,7 +318,6 @@ class Handler(BaseHTTPRequestHandler):
             pass
         self._send(303, headers=[('Location', 'status.html')])
 
-
     def _problems(self):
         """A page listing what the last health report found, with a button on each
         finding to stop it being counted and announced ("ignore"), or to undo that."""

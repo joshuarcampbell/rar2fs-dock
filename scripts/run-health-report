@@ -1,6 +1,6 @@
 #!/bin/sh
 # Runs the health report once and publishes the result on the status page.
-# Used by the weekly schedule (monitor) and by the button on the status page.
+# Used by the schedule (monitor, every HEALTH_REPORT_DAYS days) and by the button on the status page.
 #
 #   run-health-report [--notify] [folder]
 #

@@ -36,7 +36,7 @@ SETTLE=${PLEX_SETTLE_SECONDS:-90}
 DEPTH=${PLEX_WATCH_DEPTH:-4}
 dir=$(mktemp -d)
 export LC_ALL=C     # comm needs byte-order sorting
-log() { echo "media-refresh: $*"; }
+log() { printf 'media-refresh: %s\n' "$*"; }      # printf: echo would turn the \t in Y:\tv into a tab
 
 # which servers are set up
 servers=""
@@ -92,7 +92,9 @@ server_path() {  # server, source path
   case "$2" in
     /sources/*) rel=${2#/sources/}; top=${rel%%/*}; rel="${top%%@*}${rel#"$top"}" ;;
     *)  # the longest folder in folders.state that contains the path gives the name
-        rel=$(awk -F '\t' -v p="$2" '
+        # (through the environment: awk -v would rewrite a \ in a folder name)
+        rel=$(p="$2" awk -F '\t' '
+          BEGIN { p = ENVIRON["p"] }
           { n = split($2, m, ":")
             for (i = 1; i <= n; i++) if ((p == m[i] || index(p, m[i] "/") == 1) && length(m[i]) > best) { best = length(m[i]); name = $1 } }
           END { if (best) printf "%s%s", name, substr(p, best + 1) }' "$STATE" 2>/dev/null)

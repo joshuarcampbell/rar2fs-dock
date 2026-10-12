@@ -42,7 +42,9 @@ fi
 #   /sources/tv@e/Show -> /view/tv/Show        /drives/e/Concerts/Live -> /view/concerts/Live
 # (the longest source folder that contains the path decides)
 view_of() {
-  awk -F '\t' -v p="$1" '
+  # (the path goes in through the environment: awk -v would rewrite a \ in a folder name)
+  p="$1" awk -F '\t' '
+    BEGIN { p = ENVIRON["p"] }
     p == $1 || index(p, $1 "/") == 1 { if (length($1) > best) { best = length($1); name = $2 } }
     END { if (best) printf "/view/%s%s", name, substr(p, best + 1) }' "$tmp/members"
 }
@@ -72,26 +74,26 @@ while IFS= read -r dir; do
   grep -i '\.r[0-9][0-9]$' "$tmp/ls" | sed 's/\.[rR][0-9][0-9]$//' | sort -u > "$tmp/stems"
   while IFS= read -r stem; do
     [ -n "$stem" ] || continue
-    grep -qixF "$stem.rar" "$tmp/ls" || echo "$dir/$stem.r00 (no $stem.rar)" >> "$tmp/orphans"
-    awk -v s="$stem" 'BEGIN{n=length(s)}
+    grep -qixF "$stem.rar" "$tmp/ls" || printf '%s\n' "$dir/$stem.r00 (no $stem.rar)" >> "$tmp/orphans"
+    s="$stem" awk 'BEGIN{s=ENVIRON["s"]; n=length(s)}
       tolower(substr($0,1,n+2))==tolower(s) ".r" && substr($0,n+3) ~ /^[0-9][0-9]$/ {c++; v=substr($0,n+3)+0; if (v>m) m=v}
       END{ if (c && c != m+1) printf "%d of %d parts\n", c, m+1 }' "$tmp/ls" > "$tmp/gap"
-    [ -s "$tmp/gap" ] && echo "$dir/$stem.rar ($(cat "$tmp/gap"))" >> "$tmp/gaps"
+    [ -s "$tmp/gap" ] && printf '%s\n' "$dir/$stem.rar ($(cat "$tmp/gap"))" >> "$tmp/gaps"
   done < "$tmp/stems"
 
   # new style: name.part01.rar, name.part02.rar ...
   grep -i '\.part[0-9][0-9]*\.rar$' "$tmp/ls" | sed 's/\.[pP][aA][rR][tT][0-9][0-9]*\.[rR][aA][rR]$//' | sort -u > "$tmp/stems"
   while IFS= read -r stem; do
     [ -n "$stem" ] || continue
-    awk -v s="$stem" 'BEGIN{n=length(s)}
+    s="$stem" awk 'BEGIN{s=ENVIRON["s"]; n=length(s)}
       tolower(substr($0,1,n+5))==tolower(s) ".part" { v=substr($0,n+6); sub(/\.[rR][aA][rR]$/,"",v); if (v ~ /^[0-9]+$/) {c++; if (v+0>m) m=v+0} }
       END{ if (c && c != m) printf "%d of %d parts\n", c, m }' "$tmp/ls" > "$tmp/gap"
-    [ -s "$tmp/gap" ] && echo "$dir/$stem.part*.rar ($(cat "$tmp/gap"))" >> "$tmp/gaps"
+    [ -s "$tmp/gap" ] && printf '%s\n' "$dir/$stem.part*.rar ($(cat "$tmp/gap"))" >> "$tmp/gaps"
   done < "$tmp/stems"
 
   # readable = rar2fs shows at least one file here that is not in the raw folder
   if grep -qi '\.rar$' "$tmp/ls"; then
-    find "$(view_of "$dir")" -mindepth 1 -maxdepth 1 ! -name '.*' -printf '%f\n' 2>/dev/null | grep -vxFf "$tmp/ls" | grep -q . || echo "$dir" >> "$tmp/unreadable"
+    find "$(view_of "$dir")" -mindepth 1 -maxdepth 1 ! -name '.*' -printf '%f\n' 2>/dev/null | grep -vxFf "$tmp/ls" | grep -q . || printf '%s\n' "$dir" >> "$tmp/unreadable"
   fi
 done < "$tmp/dirs"
 
