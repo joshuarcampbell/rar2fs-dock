@@ -2,4 +2,4 @@
 # half-way through still work. It only passes everything on to autostart.ps1.
 # Use instead:   .\rar2fs.ps1 autostart        (other PCs: .\windows\autostart.ps1)
 param([string]$Drive = "Y:", [string]$Url = "", [string]$User = "", [string]$Pass = "", [switch]$Original)
-& (Join-Path $PSScriptRoot "autostart.ps1") @PSBoundParameters
+& (Join-Path $PSScriptRoot "autostart.ps1") @PSBoundParameters -Replace       # as it always did: this drive only

@@ -137,17 +137,13 @@ Note "The container is healthy."
 # ---------------------------------------------------------------- drive
 $certAfter = Get-CertPrint
 $certChanged = ($certAfter -ne $certBefore) -and $certBefore
-$task = Get-ScheduledTask -TaskName "rar2fs-dock mount" -ErrorAction SilentlyContinue
+$autostart = Join-Path $PSScriptRoot "autostart.ps1"
+$task = @(& $autostart -Objects | Where-Object { $_.AtLogin })              # the drives that start at login
 $mountChanged = [bool]($files | Where-Object { $_ -match '^windows/(mount|autostart|install-autostart)\.ps1$' })
 if ($task -and ($mountChanged -or $certChanged)) {
     Step "Remounting the drive"
-    $taskArgs = $task.Actions.Arguments
-    $remount = @{}
-    if ($taskArgs -match '-Drive ([A-Za-z]:)') { $remount.Drive = $Matches[1] }
-    if ($taskArgs -match '-Url (\S+)') { $remount.Url = $Matches[1] }
-    if ($taskArgs -match '-Original') { $remount.Original = $true }
-    & (Join-Path $PSScriptRoot "autostart.ps1") @remount | Out-Null           # replaces the old mount
-    Note "Remounted $($remount.Drive) ($(if ($certChanged) { 'the certificate changed' } else { 'the mount scripts changed' }))."
+    & $autostart -Refresh | Out-Null                                          # each one, as it is
+    Note "Remounted $(($task | ForEach-Object { $_.Drive }) -join ', ') ($(if ($certChanged) { 'the certificate changed' } else { 'the mount scripts changed' }))."
 } elseif ($task) {
     Note "The drive didn't need remounting."
 }

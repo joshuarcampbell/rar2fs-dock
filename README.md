@@ -86,7 +86,7 @@ for the details of one:
 | `in-use` | Show what is being read from the drive right now |
 | `limit 4` \| `half` \| `none` | Show or change how much processor it may use |
 | `mount [X:]` | Mount the drive in this window, until the window closes |
-| `autostart [X:]`, `autostart off` | Mount the drive now and at every login, or stop that |
+| `autostart [X:]`, `autostart list`, `autostart off [X:]` | Drives that appear at every login: set one up, list them, or stop one |
 | `tray on` \| `off` | The tray icon |
 | `folders`, `add-folder <path> [name]`, `remove-folder <name>` | Folders added without a restart |
 | `add-user <name> <password>` | Give another person or device its own login |
@@ -226,8 +226,22 @@ made the certificate itself (see [HTTPS](#https)). Choose *Advanced* → *Procee
 ```
 
 Both take a drive letter to use a different one (`.\rar2fs.ps1 autostart X:`). `Y:` is
-the default. They log in
-with the user and password from `.env` automatically.
+the default. They log in with the user and password from `.env` automatically.
+
+**More than one drive.** You can have several drives that start at login - `Y:` with
+shortened names and `K:` with the full ones (`.\rar2fs.ps1 autostart K: -Original`),
+for instance. Each is looked after on its own, and nothing else is ever unmounted:
+
+```powershell
+.\rar2fs.ps1 autostart list       # the drives, and whether each is mounted
+.\rar2fs.ps1 autostart            # one drive: sets it up again. Several: asks which
+.\rar2fs.ps1 autostart K:         # a new letter: asks whether to add it or move to it
+.\rar2fs.ps1 autostart off K:     # stop one (without a letter it asks; -All: every one)
+```
+
+Setting a drive up again replaces only that drive. A drive you mounted by hand with
+`mount` shows in the list too, and is left alone. `-Add` and `-Replace` answer the
+"add it or move to it" question in advance.
 
 The drive letter only appears once the container is answering. After a restart Windows
 logs in before Docker is ready, and this way programs that start at login - Plex, for
@@ -822,7 +836,8 @@ step were not part of that run.
 | See container logs | `docker logs rar2fs` |
 | Stop everything | `docker compose down` |
 | Remove the auto-mount | `.\rar2fs.ps1 autostart off` |
-| Change the drive letter | `.\rar2fs.ps1 autostart X:` |
+| Change the drive letter | `.\rar2fs.ps1 autostart X: -Replace` |
+| Have a second drive letter as well | `.\rar2fs.ps1 autostart K: -Add` |
 | Find something, see what's new, spot duplicates | The [status page](#the-library-search-recently-added-duplicates-sizes) |
 | Add a folder without a restart | `.\rar2fs.ps1 add-folder E:\Concerts` - see [Adding folders without a restart](#adding-folders-without-a-restart) |
 | Update to a newer version | `.\rar2fs.ps1 update` - see [Updating](#updating) |

@@ -36,12 +36,6 @@ if (Test-Path "$Drive\") {
     exit 1
 }
 
-$running = Get-CimInstance Win32_Process -Filter "Name = 'rclone.exe'" |
-    Where-Object { $_.CommandLine -like "*:webdav:*" }
-if ($running) {
-    Write-Warning ("A rar2fs drive is already mounted (probably by the login task). To switch " +
-        "letters, run .\rar2fs.ps1 autostart $Drive  (on a PC with only the windows folder: .\windows\autostart.ps1 -Drive $Drive -Url <address>)")
-}
 
 # Settings shared with the container (..\.env): login, HTTPS, and the short-names view
 $envFile = Join-Path $PSScriptRoot "..\.env"

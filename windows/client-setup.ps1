@@ -57,13 +57,13 @@ if (-not $reached) {
 Note "$($address.Host) answers."
 
 Step "Mounting $Drive"
-# (autostart.ps1 takes the old mount away first, by itself)
+& (Join-Path $PSScriptRoot "autostart.ps1") -Remove -All | Out-Null       # an earlier try, if there was one
 Start-Sleep -Seconds 2
 if (Test-Path "$Drive\") {
     Stop-Setup ("$Drive is already used by something else on this PC. On the server PC, run " +
         ".\rar2fs.ps1 connect-plex -Drive X: (with a letter that is free here) to make a new folder for this PC.")
 }
-& (Join-Path $PSScriptRoot "autostart.ps1") -Drive $Drive -Url $Url | Out-Null
+& (Join-Path $PSScriptRoot "autostart.ps1") -Drive $Drive -Url $Url -Replace | Out-Null     # this PC has the one drive
 $deadline = (Get-Date).AddSeconds(90)
 while (-not (Test-Path "$Drive\") -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
 if (-not (Test-Path "$Drive\")) {

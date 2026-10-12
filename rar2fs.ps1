@@ -33,8 +33,8 @@ $commands = [ordered]@{
     "in-use"        = @{ Script = "in-use.ps1";       Text = "Show what is being read from the drive right now" }
     "limit"         = @{ Script = "limit.ps1";        Text = "Show or change how much processor it may use:  limit 4 | half | none"; Words = @("Cpu") }
     "mount"         = @{ Script = "mount.ps1";        Text = "Mount the drive in this window, until the window closes:  mount [X:]"; Words = @("Drive") }
-    "autostart"     = @{ Script = "autostart.ps1";    Text = "Mount the drive now and at every login:  autostart [X:]  |  autostart off"; Words = @("Drive")
-                         Shorthand = @{ "off" = "Remove"; "remove" = "Remove"; "on" = "" } }
+    "autostart"     = @{ Script = "autostart.ps1";    Text = "Drives that appear at every login:  autostart [X:]  |  autostart list  |  autostart off [X:]"; Words = @("Drive")
+                         Shorthand = @{ "off" = "Remove"; "remove" = "Remove"; "on" = ""; "list" = "List" } }
     "tray"          = @{ Script = "tray.ps1";         Text = "The tray icon:  tray on | off | status"
                          Shorthand = @{ "on" = "Install"; "off" = "Remove"; "status" = "Once" } }
     "folders"       = @{ Script = "add-folder.ps1";   Text = "List the folders on the drive"; Always = @{ List = $true } }

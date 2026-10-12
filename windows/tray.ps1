@@ -118,16 +118,13 @@ function Get-Summary($status) {
     return @{ State = [string]$status.health; Text = $text }
 }
 
-function Get-MountArgs {
-    $task = Get-ScheduledTask -TaskName "rar2fs-dock mount" -ErrorAction SilentlyContinue
-    $found = @{ Drive = ""; Args = "" }
-    if ($task) {
-        $taskArgs = $task.Actions.Arguments
-        if ($taskArgs -match '-Drive ([A-Za-z]:)') { $found.Drive = $Matches[1]; $found.Args = "-Drive $($Matches[1])" }
-        if ($taskArgs -match '-Url (\S+)') { $found.Args += " -Url $($Matches[1])" }
-        if ($taskArgs -match '-Original') { $found.Args += " -Original" }
-    }
-    return $found
+# The drive "Open drive" means: of the drives set to start at login (there can be more
+# than one - see autostart.ps1), the first that is mounted, or else the first.
+function Get-MainDrive {
+    $drives = @(& (Join-Path $PSScriptRoot "autostart.ps1") -Objects | Where-Object { $_.AtLogin })
+    $pick = $drives | Where-Object { $_.Mounted } | Select-Object -First 1
+    if (-not $pick) { $pick = $drives | Select-Object -First 1 }
+    if ($pick) { return $pick.Drive } else { return "" }
 }
 
 if ($Once) {
@@ -303,14 +300,13 @@ $openStatusPage = { Start-Process "$((Get-Settings).Base)/status.html" }
 $openPage.add_Click($openStatusPage)
 $tray.add_DoubleClick($openStatusPage)
 $openDrive.add_Click({
-    $drive = (Get-MountArgs).Drive
+    $drive = Get-MainDrive
     if ($drive -and (Test-Path "$drive\")) { Start-Process explorer.exe "$drive\" }
     else { $tray.ShowBalloonTip(5000, "rar2fs-dock", "The drive isn't mounted. Try 'Remount drive'.", [System.Windows.Forms.ToolTipIcon]::Warning) }
 })
 $remount.add_Click({
-    $mount = Get-MountArgs
-    if (-not $mount.Args) { $mount.Args = "" }
-    $command = "& '$PSScriptRoot\autostart.ps1' $($mount.Args)"       # takes the old mount away first
+    # every drive that starts at login, set up again as it is (a first one if there is none)
+    $command = "& '$PSScriptRoot\autostart.ps1' " + $(if (Get-MainDrive) { "-Refresh" } else { "" })
     Start-Process powershell.exe -WindowStyle Hidden -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $command
     $tray.ShowBalloonTip(4000, "rar2fs-dock", "Remounting the drive...", [System.Windows.Forms.ToolTipIcon]::Info)
 })
@@ -337,8 +333,8 @@ $refresh = {
     $label = "rar2fs-dock: $($summary.Text)"
     $tray.Text = $label.Substring(0, [Math]::Min(63, $label.Length))      # Windows allows 63 characters here
     $statusItem.Text = $label
-    $drive = (Get-MountArgs).Drive
-    $openDrive.Text = $(if ($drive) { "Open drive ($drive)" } else { "Open drive" })
+    $drive = Get-MainDrive
+    $openDrive.Text =$(if ($drive) { "Open drive ($drive)" } else { "Open drive" })
     # tell the user when it changes - but not about the very first reading
     if ($script:last -and $script:last -ne $state) {
         if ($state -eq "healthy") {

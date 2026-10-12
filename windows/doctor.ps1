@@ -207,12 +207,13 @@ if ($script:failed) {
 }
 
 # ---- the drive ----
-$task = Get-ScheduledTask -TaskName "rar2fs-dock mount" -ErrorAction SilentlyContinue
-if (-not $task) {
+# every drive that is set to appear at login (there can be more than one)
+$drives = @(& (Join-Path $PSScriptRoot "autostart.ps1") -Objects | Where-Object { $_.AtLogin })
+if (-not $drives) {
     Say warn "Drive" "It isn't set up to appear when you log in. Run .\rar2fs.ps1 autostart (or .\rar2fs.ps1 mount to mount it just for now)."
-} elseif ($task.Actions.Arguments -match '-Drive ([A-Za-z]:)') {
-    $letter = $Matches[1].ToUpper()
-    if (Test-Path "$letter\") { Say ok "Drive" "$letter is mounted" }
-    else { Say warn "Drive" "$letter isn't mounted right now. Use 'Remount drive' on the tray icon, or run .\rar2fs.ps1 autostart again." }
+}
+foreach ($d in $drives) {
+    if (Test-Path "$($d.Drive)\") { Say ok "Drive" "$($d.Drive) is mounted" }
+    else { Say warn "Drive" "$($d.Drive) isn't mounted right now. Use 'Remount drive' on the tray icon, or run .\rar2fs.ps1 autostart $($d.Drive) again." }
 }
 Finish

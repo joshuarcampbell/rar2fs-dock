@@ -313,15 +313,18 @@ $mountedOn = ""
 if (-not $NoMount) {
     Step "Mounting the drive"
     $used = @((Get-PSDrive -PSProvider FileSystem).Name) + @(Get-ChildItem "HKCU:\Network" -ErrorAction SilentlyContinue | ForEach-Object { $_.PSChildName.ToUpper() })
-    $existing = Get-ScheduledTask -TaskName "rar2fs-dock mount" -ErrorAction SilentlyContinue
-    if (-not $Drive -and $existing -and $existing.Actions.Arguments -match '-Drive ([A-Za-z]:)') { $Drive = $Matches[1] }   # keep the letter in use
+    $autostart = Join-Path $PSScriptRoot "autostart.ps1"
+    $existing = @(& $autostart -Objects | Where-Object { $_.AtLogin })      # drives already set to start at login
+    $chosen = [bool]$Drive                                                  # a letter was asked for with -Drive
+    if (-not $Drive -and $existing) { $Drive = $existing[0].Drive }         # keep what is in use
     if (-not $Drive) {
         $free = @('R','M','N','L','K','J','T','U','V','W','X','Y','Z','G','H','I','O','P','Q','S') | Where-Object { $used -notcontains $_ } | Select-Object -First 1
         if (-not $free) { Stop-Setup "No free drive letter found. Free one up, or choose with -Drive." }
         $Drive = (Ask "Drive letter to use" "${free}:")
     }
     $Drive = $Drive.Substring(0, 1).ToUpper() + ":"
-    & (Join-Path $PSScriptRoot "autostart.ps1") -Drive $Drive | Out-Null      # replaces an earlier mount
+    if ($existing -and -not $chosen) { & $autostart -Refresh | Out-Null }     # the drive(s) you have, set up again
+    else { & $autostart -Drive $Drive -Replace | Out-Null }                   # this letter, in place of any other
     $deadline = (Get-Date).AddSeconds(90)
     while (-not (Test-Path "$Drive\") -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
     if (Test-Path "$Drive\") { $mountedOn = $Drive; Note "$Drive is mounted and will come back at every login." }
