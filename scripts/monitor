@@ -53,6 +53,20 @@ date +%s > /state/started
 echo starting > /state/health
 fails=0
 
+# Say "healthy" as soon as it is true. The checks below run once a minute, which would
+# leave the status page and the tray icon on "starting" for the first minute of every
+# start, long after the drive was working. So look every few seconds until the first
+# good check (or until the regular checks take over).
+waited=0
+while [ "$waited" -lt "$INTERVAL" ]; do
+  if healthcheck > /dev/null 2>&1; then
+    echo healthy > /state/health
+    status-page 2>/dev/null
+    break
+  fi
+  sleep 3; waited=$((waited + 3))
+done
+
 while sleep "$INTERVAL"; do
   # ---- health ----
   if out=$(healthcheck 2>&1); then
