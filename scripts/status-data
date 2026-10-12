@@ -28,6 +28,8 @@ done
 unrar_latest=$(val unrar_latest); rar2fs_latest=$(val rar2fs_latest)
 if newer "$unrar_latest" "$UNRAR_VERSION"; then unrar_update=true; else unrar_update=false; fi
 if newer "$rar2fs_latest" "$RAR2FS_VERSION"; then rar2fs_update=true; else rar2fs_update=false; fi
+rclone_latest=$(val rclone_latest)
+if newer "$rclone_latest" "$VERSION_RCLONE"; then rclone_update=true; else rclone_update=false; fi
 
 # ---- health report ----
 report=$www/health-report.txt
@@ -81,6 +83,7 @@ jq -n \
   --slurpfile folders "$tmp/folders" --slurpfile events "$tmp/events" --slurpfile checks "$tmp/checks" --slurpfile activity "$tmp/activity" \
   --arg unrar "$UNRAR_VERSION" --arg unrar_latest "$unrar_latest" --argjson unrar_update "$unrar_update" \
   --arg rar2fs "$RAR2FS_VERSION" --arg rar2fs_latest "$rar2fs_latest" --argjson rar2fs_update "$rar2fs_update" \
+  --arg rclone "$VERSION_RCLONE" --arg rclone_latest "$rclone_latest" --argjson rclone_update "$rclone_update" \
   --argjson r_running "$r_running" --arg r_scope "$r_scope" --argjson r_finished "$(num "$r_finished")" \
   --argjson r_ignored "$r_ignored" \
   --argjson c_empty "$(num "$(count 'Empty folders')")" \
@@ -100,7 +103,7 @@ jq -n \
       started: $started,
       folders_total: ($folders | length),
       folders_mounted: ($folders | map(select(.mounted)) | length),
-      updates_available: ([$unrar_update, $rar2fs_update] | map(select(.)) | length),
+      updates_available: ([$unrar_update, $rar2fs_update, $rclone_update] | map(select(.)) | length),
       reading_now: ($activity[0].reading | length),
       setup_problems: ($checks[0] | map(select(.level != "ok")) | length),
       report_problems: (if $r_finished == null then null else ($counts | map(. // 0) | add) end),
@@ -113,7 +116,8 @@ jq -n \
       activity: $activity[0],
       versions: {
         unrar:  {installed: $unrar,  latest: (if $unrar_latest  == "" then null else $unrar_latest  end), update_available: $unrar_update},
-        rar2fs: {installed: $rar2fs, latest: (if $rar2fs_latest == "" then null else $rar2fs_latest end), update_available: $rar2fs_update}
+        rar2fs: {installed: $rar2fs, latest: (if $rar2fs_latest == "" then null else $rar2fs_latest end), update_available: $rar2fs_update},
+        rclone: {installed: $rclone, latest: (if $rclone_latest == "" then null else $rclone_latest end), update_available: $rclone_update}
       },
       report: {running: $r_running, scope: (if $r_scope == "" then null else $r_scope end), finished: $r_finished, counts: $counts, ignored: $r_ignored},
       settings: {https: $https, short_names: $short, auto_restart: $auto_restart, plex_refresh: $plex, notifications: $notify},

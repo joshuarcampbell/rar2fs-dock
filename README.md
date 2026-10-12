@@ -873,7 +873,7 @@ self-signed certificate the first time; accept it once. It shows each folder, wh
 comes from and whether it's mounted or has stopped,
 [what is being read right now](#whats-in-use-and-restart-warnings), the result of the
 [setup check](#setup-check), [what's on the drive](#the-library-search-recently-added-duplicates-sizes),
-the unrar/rar2fs versions and whether newer ones exist, the last health report, recent
+the unrar/rar2fs/rclone versions and whether newer ones exist, the last health report, recent
 events (restarts, media-server scans, alerts) and [every setting](#settings) with its
 current value.
 
@@ -966,7 +966,7 @@ check the status page. You get a message when:
 
 - the container goes unhealthy, restarts itself, recovers, or gives up restarting
 - the status page had to be restarted
-- a newer unrar or rar2fs release is out (checked daily)
+- a newer unrar, rar2fs or rclone release is out (checked daily)
 - the scheduled health report finds **new** problems (every `HEALTH_REPORT_DAYS` days,
   7 by default; problems it has already told you about aren't repeated)
 
@@ -1236,19 +1236,29 @@ ones you [ignored](#health-report)), `restarts_last_hour`,
 seconds since 1970), and the full lists under `folders`, `activity`, `setup_check`,
 `versions`, `report`, `settings` and `events`.
 
-### Updates for unrar and rar2fs
+### Updates for unrar, rar2fs and rclone
 
-unrar is the part that reads untrusted archives, so it's the one worth keeping
-current. When the status page (or a notification) says a newer version is out:
+Two parts are worth keeping current: unrar, which reads untrusted archives, and
+rclone, the server your other devices talk to. When the status page (or a
+notification) says a newer version of one is out:
 
-1. In the `Dockerfile`, change `UNRAR_VERSION` (or `RAR2FS_VERSION`) at the top.
-2. Update the matching `..._SHA256` line. Get the new value with:
+1. In the `Dockerfile`, change `UNRAR_VERSION`, `RAR2FS_VERSION` or `RCLONE_VERSION`
+   at the top.
+2. Update the matching `..._SHA256` line. For unrar, get the new value with:
    ```powershell
-   curl.exe -sL https://www.rarlab.com/rar/unrarsrc-<version>.tar.gz | docker run --rm -i debian:bookworm-slim sha256sum
+   curl.exe -sL https://www.rarlab.com/rar/unrarsrc-<version>.tar.gz | docker run --rm -i debian:trixie-slim sha256sum
    ```
+   For rclone there are two lines, one per kind of processor. Both values are listed
+   at `https://downloads.rclone.org/v<version>/SHA256SUMS`, next to
+   `rclone-v<version>-linux-amd64.zip` and `...-linux-arm64.zip`.
 3. `docker compose up -d --build`
 
-The build fails if the hash doesn't match the download, so a typo can't slip through.
+The build fails if a hash doesn't match the download, so a typo can't slip through.
+
+**The rest of the image** is Debian packages, which get their fixes when the image is
+rebuilt: `docker compose build --pull` and then `docker compose up -d`. If a scanner
+such as Docker Scout still lists findings afterwards, see
+[Security](#security) for what remains and why.
 
 ### HTTPS
 
@@ -1736,12 +1746,21 @@ the mistakes below by itself and says how to fix them.
   then fails to mount its folders, remove the line from `.env` to go back. Docker
   Desktop on Windows and Mac doesn't use AppArmor at all, so there is nothing to do
   there.
-- **Pinned downloads.** The unrar and rar2fs source downloads are checked against
-  SHA-256 hashes in the `Dockerfile`. Update the hash whenever you change a version.
+- **Pinned downloads.** The unrar and rar2fs sources and the rclone program are
+  checked against SHA-256 hashes in the `Dockerfile`. Update the hash whenever you
+  change a version.
+- **A small image, and what a scanner still finds in it.** The image holds only what
+  the container uses, on the current Debian release. A vulnerability scanner will
+  still list some findings in Debian's own libraries for which Debian has published
+  no fix. The ones rated highest are in libraries that Debian's `curl` loads for old
+  protocols (LDAP, RTMP); the container's `curl` is held to http and https, so that
+  code is never run. They disappear by themselves when Debian fixes them and the
+  image is rebuilt.
 - **Keep it updated.** rar2fs uses unrar to read archives, and unrar has had security
-  bugs before. The container checks daily for newer releases and tells you on the
+  bugs before; rclone is what answers on the network. The container checks daily for
+  newer releases of both and tells you on the
   status page (and by notification, if set up); see
-  [Updates for unrar and rar2fs](#updates-for-unrar-and-rar2fs). Rebuilding now and
+  [Updates for unrar, rar2fs and rclone](#updates-for-unrar-rar2fs-and-rclone). Rebuilding now and
   then with `docker compose build --pull` also picks up Debian's own fixes.
 
 ## Why this design

@@ -106,7 +106,8 @@ status-page 2>/dev/null || true
 status-server &
 monitor &
 # what is being read right now, and by whom (HAProxy reports each request to it, below)
-( while :; do activity; sleep 5; done ) &
+# (set +e: this script stops at the first error, and a tracker that died is exactly when to carry on)
+( set +e; while :; do activity; sleep 5; done ) &
 
 # ---- optional: tell Plex, Jellyfin or Emby to scan folders as soon as they change ----
 # (media-refresh exits straight away if none of them is set up)
@@ -145,7 +146,7 @@ fi
 cat > /tmp/haproxy.cfg <<HAPROXY
 global
     maxconn 512
-    log /tmp/activity.sock len 2048 local0
+    log 127.0.0.1:8514 len 2048 local0
 defaults
     mode http
     timeout connect 5s
@@ -166,7 +167,7 @@ frontend drive
     http-request set-var(txn.user) "req.hdr(Authorization),regsub(^[Bb]asic +,),b64dec,regsub(:.*,)" if has_auth
     log global
     option logasap
-    log-format "RQ|%ci|%fp|%[var(txn.user)]|%HM|%HP"
+    log-format "RQ|%ci|%fp|%[var(txn.user)]|%HM|%HPO"
     http-request track-sc0 str(all) table st_bad
     http-request track-sc1 var(txn.auth) table st_good if has_auth
     acl known_good sc1_get_gpc0 gt 0

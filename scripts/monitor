@@ -2,7 +2,7 @@
 # Background watchdog, started by the entrypoint.
 #   - runs the health check every minute; after 3 failures in a row it restarts the
 #     container (AUTO_RESTART=0 turns that off). Gives up after 3 restarts in an hour.
-#   - checks daily for newer unrar / rar2fs releases
+#   - checks daily for newer unrar / rar2fs / rclone releases
 #   - runs the health report every HEALTH_REPORT_DAYS days (0 = never)
 #   - rebuilds the status page every minute
 #   - if HEARTBEAT_URL is set, pings it every minute while healthy (see heartbeat below)
@@ -16,7 +16,8 @@ rm -f /state/report.running /state/library.scanning /tmp/library-index.running
 # The saved update check belongs to the image that made it. After a rebuild with other
 # versions, throw it away so the check runs again on the first pass.
 saved() { sed -n "s/^$1=//p" /state/versions 2>/dev/null; }
-if [ "$(saved unrar_built)" != "$UNRAR_VERSION" ] || [ "$(saved rar2fs_built)" != "$RAR2FS_VERSION" ]; then
+if [ "$(saved unrar_built)" != "$UNRAR_VERSION" ] || [ "$(saved rar2fs_built)" != "$RAR2FS_VERSION" ] \
+   || [ "$(saved rclone_built)" != "$VERSION_RCLONE" ]; then
   rm -f /state/versions /state/versions.notified
 fi
 # upgrading from a version that timed the schedule by the report file itself
@@ -119,7 +120,7 @@ while sleep "$INTERVAL"; do
     fi
   fi
 
-  # ---- daily: newer unrar / rar2fs? ----
+  # ---- daily: newer unrar / rar2fs / rclone? ----
   if [ "$(age /state/versions)" -gt 86400 ]; then
     found=$(update-check)
     if [ -n "$found" ] && [ "$found" != "$(cat /state/versions.notified 2>/dev/null)" ]; then

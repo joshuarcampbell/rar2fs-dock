@@ -4,8 +4,9 @@
 Two sources are combined:
 
   - HAProxy tells this program about every request as it starts (who, from where, which
-    path), through the log socket /tmp/activity.sock - see the haproxy.cfg the
-    entrypoint writes. Passwords never come this way: only the user name is passed on.
+    path), as log lines sent to 127.0.0.1:8514 - see the haproxy.cfg the entrypoint
+    writes. Passwords never come this way: only the user name is passed on. (UDP, so
+    that it carries on working if either program is restarted.)
   - The files the two WebDAV servers (rclone) have open are read from /proc. How far
     into each file they are gives the progress, and how fast that moves gives the speed.
 
@@ -32,7 +33,7 @@ import time
 import urllib.parse
 from collections import deque
 
-SOCKET = '/tmp/activity.sock'
+LISTEN = ('127.0.0.1', 8514)     # where HAProxy sends its log lines (UDP, inside the container only)
 OUT = '/tmp/activity.json'
 ROOTS = {'8080': '/view', '8082': '/short/view'}     # HAProxy port -> what that port serves
 INTERVAL = 2            # seconds between looks at /proc
@@ -46,16 +47,9 @@ lock = threading.Lock()
 
 def listen():
     """Receive HAProxy's log lines: ...RQ|<client>|<port>|<user>|<method>|<path>"""
-    try:
-        os.unlink(SOCKET)
-    except OSError:
-        pass
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-    old = os.umask(0o077)
-    try:
-        sock.bind(SOCKET)
-    finally:
-        os.umask(old)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(LISTEN)
     while True:
         try:
             line = sock.recv(8192).decode('utf-8', 'replace')
@@ -67,11 +61,14 @@ def listen():
                 continue
             _, client, port, user, method, path = parts
             root = ROOTS.get(port)
-            if not root:
-                continue
-            path = urllib.parse.unquote(path, errors='surrogateescape').strip('/')
+            if not root or user in ('', '-'):
+                continue        # not one of ours, or sent without a login (and so refused)
+            # over HTTP/2 the path arrives as a whole address: keep what follows the host
+            if not path.startswith('/') and '://' in path:
+                path = '/' + path.split('://', 1)[1].partition('/')[2]
+            path = urllib.parse.unquote(path.split('?', 1)[0], errors='surrogateescape').strip('/')
             with lock:
-                requests.append((time.time(), method, user or '?', client, root, path))
+                requests.append((time.time(), method, user, client, root, path))
         except Exception:
             time.sleep(0.2)
 

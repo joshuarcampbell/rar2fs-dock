@@ -105,9 +105,9 @@ echo "<p class=\"sub\" style=\"margin:10px 0 0\">$( [ -n "$passed" ] && printf '
 library-html 2>/dev/null       # overview, recently added, duplicates
 
 echo '<section><h2>Versions</h2><table><tr><th>Component</th><th>In this image</th><th>Latest</th><th></th></tr>'
-for c in unrar rar2fs; do
+for c in unrar rar2fs rclone; do
   # "In this image" comes from the running image itself, never from the saved check
-  if [ "$c" = unrar ]; then b=$UNRAR_VERSION; else b=$RAR2FS_VERSION; fi
+  case "$c" in unrar) b=$UNRAR_VERSION ;; rar2fs) b=$RAR2FS_VERSION ;; *) b=$VERSION_RCLONE ;; esac
   l=$(val "${c}_latest")
   if [ -z "$l" ]; then note='<span class="dim">not checked yet</span>'
   elif [ "$b" = "$l" ] || [ "$(printf '%s\n%s\n' "$b" "$l" | sort -V | tail -1)" = "$b" ]; then note='<span class="badge ok">up to date</span>'

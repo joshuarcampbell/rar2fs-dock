@@ -1,0 +1,9 @@
+#!/bin/sh
+# Every web request the scripts make goes through here, because /usr/local/bin comes
+# before /usr/bin: the real curl, held to http and https.
+#
+# Debian's curl can also speak a dozen older protocols (LDAP, RTMP and so on), each
+# through a library of its own with its own security bugs. Nothing here needs them,
+# and with this they can't be reached - not even through a redirect, or a mistyped
+# address in .env.
+exec /usr/bin/curl --proto '=http,https' --proto-redir '=http,https' "$@"
