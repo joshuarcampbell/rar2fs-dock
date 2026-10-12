@@ -1,7 +1,7 @@
 # Changes how much of the processor the container may use - while it runs, with no
 # restart and nothing interrupted. Handy during a big library scan.
 #
-#     .\rar2fs.ps1 limit                 show the limit now
+#     .\rar2fs.ps1 limit            show the limit now
 #     .\rar2fs.ps1 limit 4          at most 4 processor cores
 #     .\rar2fs.ps1 limit half       half of what Docker has (also: quarter)
 #     .\rar2fs.ps1 limit none       no limit

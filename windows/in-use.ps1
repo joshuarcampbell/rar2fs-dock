@@ -1,11 +1,12 @@
 # Says what is being read from the drive right now, and by whom - so you know whether
 # restarting the container would interrupt somebody's film.
 #
-#     .\rar2fs.ps1 in-use                              print the list
-#     .\windows\in-use.ps1 -AskBefore "restarting"      used by the other scripts: if
-#                                                        something is being read, show it
-#                                                        and ask; returns $true to go ahead
-#     .\windows\in-use.ps1 -Quiet                       return the list and print nothing
+#     .\rar2fs.ps1 in-use          print the list
+#
+# The other scripts call this file themselves, before they restart anything:
+#     in-use.ps1 -AskBefore "Updating"    if something is being read, show it and ask;
+#                                         returns $true to go ahead
+#     in-use.ps1 -Quiet                   return the list and print nothing
 #
 # The list comes from the container (its "In use now" section on the status page shows
 # the same). If the container isn't running, nothing is in use.

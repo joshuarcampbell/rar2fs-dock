@@ -4,6 +4,7 @@
 #   3. writes .env with a random password
 #   4. builds and starts the container
 #   5. mounts the drive and makes it come back at every login
+#   6. offers the tray icon, and to set up Plex on another Windows PC
 #
 # Run it from a normal (non-admin) PowerShell, in the repo folder:
 #     .\rar2fs.ps1 setup

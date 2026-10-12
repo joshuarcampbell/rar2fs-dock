@@ -1,5 +1,5 @@
 # Connects a Plex server on ANOTHER Windows PC to this PC's rar2fs-dock. Run it here, on
-# the PC with the container; setup.ps1 offers to at the end.
+# the PC with the container; ".\rar2fs.ps1 setup" offers to at the end.
 #
 #     .\rar2fs.ps1 connect-plex
 #
