@@ -23,7 +23,8 @@
   function update() {
     if (busy || document.hidden) return;  // nobody is looking: don't make the container work
     busy = true;
-    fetch('status.html', { cache: 'no-store' }).then(function (answer) {
+    // this same page again: status.html, or public.html for someone without a login
+    fetch(location.pathname.split('/').pop() || 'status.html', { cache: 'no-store' }).then(function (answer) {
       if (!answer.ok) throw new Error(answer.status);
       return answer.text();
     }).then(function (text) {

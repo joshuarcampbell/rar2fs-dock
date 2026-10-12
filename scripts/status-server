@@ -18,6 +18,9 @@ Every request needs a login from the same list as the drive (/tmp/htpasswd). The
 exception: if STATUS_TOKEN is set, /status.json, /metrics and /recent.xml also accept
 ?token=..., for dashboards and feed readers that can't send a user name and password.
 The token can only read those three; it can't open the page or start anything.
+And if STATUS_PUBLIC is "minimal", "full" or "everything", /public.html opens with no login at all
+(with "full", so do the report, the duplicates list and the feed it links to; with
+"everything", search, status.json and /metrics as well).
 It serves HTTPS using /tls/cert.pem and /tls/key.pem, unless TLS=0.
 """
 import base64
@@ -42,6 +45,18 @@ IGNORED = '/state/report.ignored'       # one finding per line, exactly as the r
 _ignore_lock = threading.Lock()
 STATUS_TOKEN = os.environ.get('STATUS_TOKEN', '')
 TOKEN_PATHS = ('/status.json', '/metrics', '/recent.xml')      # all a token can read
+# What may be seen with no login at all (STATUS_PUBLIC): nothing; a page saying only
+# whether it is healthy; the status page read-only without its search, settings and
+# source paths ("full"); or all of its information ("everything"). status-page makes
+# that page. Nothing can ever be started without a login, whatever this is set to.
+PUBLIC = os.environ.get('STATUS_PUBLIC', 'off').strip().lower()
+if PUBLIC not in ('minimal', 'full', 'everything'):
+    PUBLIC = 'off'
+_FULL = ('/public.html', '/health-report.txt', '/duplicates.txt', '/recent.xml')
+PUBLIC_PATHS = {'off': (), 'minimal': ('/public.html',), 'full': _FULL,
+                # everything: the page keeps its settings and its search box, and the
+                # same information may be fetched as data
+                'everything': _FULL + ('/search', '/status.json', '/metrics')}[PUBLIC]
 ITEMS = '/state/library/items.tsv'
 SCANNING = '/state/library.scanning'
 CSS = '/usr/local/bin/page.css'
@@ -193,9 +208,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         url = urllib.parse.urlparse(self.path)
-        if not self._token_ok(url) and not self._authorised():
-            return
         path = url.path
+        # someone arriving at the bare address without a login goes to the public page, if there is one
+        if path in ('', '/') and PUBLIC != 'off' and not self.headers.get('Authorization'):
+            return self._send(302, headers=[('Location', 'public.html')])
+        if path not in PUBLIC_PATHS and not self._token_ok(url) and not self._authorised():
+            return
         if path in ('', '/'):
             return self._send(302, headers=[('Location', 'status.html')])
         if path == '/problems':
@@ -210,8 +228,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, f.read(), METRICS_TYPE)
         name = os.path.basename(path)       # only files directly in WWW are served
         full = os.path.join(WWW, name)
-        if path == '/status.html':
-            refresh_page()
+        if path in ('/status.html', '/public.html'):
+            refresh_page()          # builds both
         if path != '/' + name or name.startswith('.') or not os.path.isfile(full):
             return self._send(404, b'Not found\n')
         with open(full, 'rb') as f:
@@ -259,7 +277,8 @@ class Handler(BaseHTTPRequestHandler):
             '<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width, initial-scale=1"><title>Search - rar2fs-dock</title>'
             '<style>%s</style></head><body><main>'
-            '<h1>Search</h1><p class="sub"><a href="status.html">&larr; Back to the status page</a></p>'
+            # "./" goes back to whichever page this visitor may see: status.html, or public.html
+            '<h1>Search</h1><p class="sub"><a href="./">&larr; Back to the status page</a></p>'
             '<form method="get" action="search" class="run" style="margin:0 0 16px">'
             '<input type="search" name="q" value="%s" placeholder="Search the library by name" required autofocus> '
             '<button type="submit">Search</button></form>'

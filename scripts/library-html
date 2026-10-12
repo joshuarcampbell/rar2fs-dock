@@ -38,9 +38,11 @@ jq -r --argjson scanning "$scanning" '
      (.folders[] | "<tr><td><code>\(.folder | e)</code></td><td class=\"n\">\(.items)</td></tr>"),
      "</table>"
    end),
+  "<!--private-->",          # status-page leaves these lines out of the public page
   "<form method=\"post\" action=\"run-scan\" class=\"run\">"
   + (if $scanning then "<button type=\"submit\" disabled>Scanning…</button>" else "<button type=\"submit\">Scan sizes</button>" end)
   + " <span class=\"dim\">Reads the size of every file, so it takes a while on a large library.</span></form>",
+  "<!--/private-->",
   "</section>",
 
   # ---------------- recently added ----------------

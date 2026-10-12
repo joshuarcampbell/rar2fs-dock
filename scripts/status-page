@@ -38,10 +38,14 @@ $(cat /usr/local/bin/page.css)
 </style></head><body><p id="lost" hidden></p><main>
 <h1>rar2fs-dock <span class="badge $badge">$label</span></h1>
 <p class="sub">Started $(when "$(cat /state/started 2>/dev/null)") · live, last updated $(when "$(date +%s)")$( [ -n "$detail" ] && printf ' · %s' "$(printf '%s' "$detail" | esc)")</p>
+<!--public <p class="sub"><a href="status.html">Log in</a> for search, reports and settings.</p> -->
+<!--public-all <p class="sub"><a href="status.html">Log in</a> to run reports and scans.</p> -->
+<!--sensitive-->
 <form method="get" action="search" class="run" style="margin:0 0 16px"><input type="search" name="q" placeholder="Search the library by name" required> <button type="submit">Search</button></form>
+<!--/sensitive-->
 
 <section><h2>Folders</h2><table>
-<tr><th>Folder</th><th>Comes from</th><th>Status</th><th style="text-align:right">Items</th></tr>
+<tr><th>Folder</th><th class="from">Comes from</th><th>Status</th><th style="text-align:right">Items</th></tr>
 HTML
 # the folders that should exist, whether or not they are still alive
 folders=$(sed -n 's|^/view/||p' /tmp/mounts.expected 2>/dev/null)
@@ -54,7 +58,8 @@ for name in $folders; do
       case "$m" in "/sources/$name@"*) rel="" ;; esac
       printf '%s%s<br>' "$( [ -n "$rel" ] && printf '<span class="dim">%s:</span> ' "$(printf '%s' "${rel#/}" | esc)")" "$(origin "$m" | esc)"
     done)
-  printf '<tr><td><code>%s</code></td><td>%s</td><td>%s</td><td class="n">%s</td></tr>\n' "$(printf '%s' "$name" | esc)" "$from" "$st" "$n"
+  # (class "from": that cell is taken out of the public page - see the end of this file)
+  printf '<tr><td><code>%s</code></td><td class="from">%s</td><td>%s</td><td class="n">%s</td></tr>\n' "$(printf '%s' "$name" | esc)" "$from" "$st" "$n"
 done
 echo '</table></section>'
 
@@ -90,12 +95,16 @@ echo '</section>'
 doctor > /state/doctor.tsv.$$.tmp 2>/dev/null && mv /state/doctor.tsv.$$.tmp /state/doctor.tsv
 echo '<section><h2>Setup check</h2>'
 if grep -qv "^ok$TAB" /state/doctor.tsv 2>/dev/null; then
+  # the details can name paths and addresses, so the public page only says how many there are
+  echo "<!--public <p><span class=\"badge wait\">$(grep -cv "^ok$TAB" /state/doctor.tsv) to look at</span> Log in for the details.</p> -->"
+  echo '<!--sensitive-->'
   echo '<table>'
   grep -v "^ok$TAB" /state/doctor.tsv | sort | while IFS="$TAB" read -r level title msg; do
     [ "$level" = bad ] && b='<span class="badge bad">problem</span>' || b='<span class="badge wait">check</span>'
     printf '<tr><td>%s</td><td><b>%s</b><br>%s</td></tr>\n' "$b" "$(printf '%s' "$title" | esc)" "$(printf '%s' "$msg" | esc)"
   done
   echo '</table>'
+  echo '<!--/sensitive-->'
 else
   echo '<p><span class="badge ok">all good</span> Nothing looks wrong from inside the container.</p>'
 fi
@@ -123,7 +132,9 @@ if [ -f /state/report.running ]; then
 fi
 if [ -f /state/www/health-report.txt ]; then
   scope=$(sed -n '1s/^Health report for: //p' /state/www/health-report.txt)
-  echo "<p>Last report: <b>$(printf '%s' "${scope:-everything}" | esc)</b>, finished $(when "$(stat -c %Y /state/www/health-report.txt)") · <a href=\"problems\">review the problems</a> · <a href=\"health-report.txt\">full report</a></p><table>"
+  echo "<p>Last report: <b>$(printf '%s' "${scope:-everything}" | esc)</b>, finished $(when "$(stat -c %Y /state/www/health-report.txt)") · <a href=\"health-report.txt\">full report</a>"
+  echo '<!--private-->'; echo ' · <a href="problems">review the problems</a>'; echo '<!--/private-->'
+  echo '</p><table>'
   # problems you marked "ignore" on the problems list are left out of the counts
   report-counts | while IFS="$TAB" read -r kind shown ignored; do
     printf '<tr><td>%s</td><td class="n">%s%s</td></tr>\n' "$(printf '%s' "$kind" | esc)" "$shown" \
@@ -134,6 +145,7 @@ elif [ ! -f /state/report.running ]; then
   echo '<p class="none">No report yet.</p>'
 fi
 # the button: everything, a folder, or one of the sub-folders a folder is made of
+echo '<!--private-->'
 echo '<form method="post" action="run-report" class="run"><label for="folder">Check</label> <select name="folder" id="folder"><option value="">Everything</option>'
 for name in $folders; do
   ls "/view/$name" > /dev/null 2>&1 || continue      # a stopped folder can't be checked
@@ -148,6 +160,7 @@ if [ -f /state/report.running ]; then
 else
   echo '</select> <button type="submit">Run health report</button></form>'
 fi
+echo '<!--/private-->'
 echo "<p class=\"sub\" style=\"margin:10px 0 0\">A full report also runs by itself every ${HEALTH_REPORT_DAYS:-7} days. Checking everything can take a while; a single folder is much quicker.</p>"
 echo '</section>'
 
@@ -165,9 +178,17 @@ onoff() { [ "$1" = "$2" ] && echo on || echo off; }
 media_servers=$( { [ -n "$PLEX_URL" ] && [ -n "$PLEX_TOKEN" ] && printf 'Plex · %s\n' "$PLEX_URL"
                    [ -n "$JELLYFIN_URL" ] && [ -n "$JELLYFIN_API_KEY" ] && printf 'Jellyfin · %s\n' "$JELLYFIN_URL"
                    [ -n "$EMBY_URL" ] && [ -n "$EMBY_API_KEY" ] && printf 'Emby · %s\n' "$EMBY_URL"; } | esc | sed 's/$/<br>/')
+case "${STATUS_PUBLIC:-off}" in
+  everything) public_page='everything · <a href="public.html">public.html</a> shows all of this page without a login, except the buttons' ;;
+  full)    public_page='full · <a href="public.html">public.html</a> opens without a login' ;;
+  minimal) public_page='minimal · <a href="public.html">public.html</a> shows only whether it is healthy, without a login' ;;
+  *)       public_page='off (every page needs a login)' ;;
+esac
 cat <<HTML
+<!--sensitive-->
 <section><h2>Settings</h2><table>
 <tr><td>Instant refresh</td><td>${media_servers:-off (no media server set up)}</td></tr>
+<tr><td>Public page</td><td>$public_page</td></tr>
 <tr><td>Heartbeat</td><td>$( [ -n "$HEARTBEAT_URL" ] && echo on || echo 'off (no HEARTBEAT_URL)')</td></tr>
 <tr><td>Notifications</td><td>$( [ -n "$NOTIFY_URL" ] && echo on || echo 'off (no NOTIFY_URL)')</td></tr>
 <tr><td>Automatic restart</td><td>$(onoff "${AUTO_RESTART:-1}" 1)</td></tr>
@@ -208,7 +229,8 @@ setting MEMORY_LIMIT          "${MEMORY_LIMIT:-0}"            0          'Most m
 setting LIBRARY_INDEX_MINUTES "${LIBRARY_INDEX_MINUTES:-10}"  10         'Minutes between rebuilds of the search and duplicates index'
 setting NOTIFY_URL            "$(hidden "$NOTIFY_URL")"       ''         'Where alerts are sent'
 setting HEARTBEAT_URL         "$(hidden "$HEARTBEAT_URL")"    ''         'A URL pinged every minute while healthy'
-setting STATUS_TOKEN          "$(hidden "$STATUS_TOKEN")"     ''         'Read-only token for status.json, /metrics and the RSS feed'
+setting STATUS_PUBLIC         "${STATUS_PUBLIC:-off}"         off        'A status page without a login (public.html): off, minimal, full or everything'
+setting STATUS_TOKEN        "$(hidden "$STATUS_TOKEN")"     ''         'Read-only token for status.json, /metrics and the RSS feed'
 setting PLEX_URL              "$PLEX_URL"                     ''         'Plex: where it answers'
 setting PLEX_TOKEN            "$(hidden "$PLEX_TOKEN")"       ''         'Plex: its token'
 setting PLEX_PATH_MAP         "$PLEX_PATH_MAP"                ''         'Plex: where each folder is on the Plex machine'
@@ -228,11 +250,55 @@ cat <<HTML
 </table>
 <p class="sub" style="margin:10px 0 0">Not visible from inside the container, so not listed: <code>WEBDAV_USER</code> / <code>WEBDAV_PASS</code> (see Logins above), <code>BIND</code>, <code>NAS_USER</code> / <code>NAS_PASS</code> and <code>APPARMOR_PROFILE</code>. Your folders are in <code>docker-compose.override.yml</code>.</p>
 </section>
+<!--/sensitive-->
 </main>
 <script>
 $(cat /usr/local/bin/page.js)
 </script></body></html>
 HTML
 } > "$out.$$.tmp" && mv "$out.$$.tmp" "$out"     # own temp file: several can run at once
+
+# ---- the public page: what someone without a login may see (STATUS_PUBLIC) ----
+#   everything  this same page with all its information; only what DOES something is
+#               taken out - the buttons and the problems list, between the "private"
+#               marks above. For a network you trust, or one kept apart from the rest.
+#   full      the same, also minus what is between the "sensitive" marks - the search
+#             box, the settings (which name your logins and your media server) and the
+#             details of the setup check - and minus where each folder comes from (a
+#             path on your PC or NAS)
+#   minimal   only whether it is healthy and how many folders are up
+#   off       no such page
+pub=/state/www/public.html
+case "${STATUS_PUBLIC:-off}" in
+  everything)
+    sed -e '/^<!--private-->$/,/^<!--\/private-->$/d' -e '/^<!--\/\{0,1\}sensitive-->$/d' \
+        -e 's/^<!--public-all \(.*\) -->$/\1/' -e '/^<!--public .* -->$/d' \
+        "$out" > "$pub.$$.tmp" && mv "$pub.$$.tmp" "$pub" ;;
+  full)
+    sed -e '/^<!--private-->$/,/^<!--\/private-->$/d' -e '/^<!--sensitive-->$/,/^<!--\/sensitive-->$/d' \
+        -e 's/^<!--public \(.*\) -->$/\1/' -e '/^<!--public-all .* -->$/d' \
+        -e 's|<th class="from">[^<]*</th>||' -e 's|<td class="from">.*</td>\(<td><span class="badge \)|\1|' \
+        "$out" > "$pub.$$.tmp" && mv "$pub.$$.tmp" "$pub" ;;
+  minimal)
+    up=0; all=0
+    for name in $folders; do all=$((all + 1)); mount-alive "/view/$name" && up=$((up + 1)); done
+    cat > "$pub.$$.tmp" <<HTML && mv "$pub.$$.tmp" "$pub"
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<noscript><meta http-equiv="refresh" content="60"></noscript><title>rar2fs-dock</title>
+<style>
+$(cat /usr/local/bin/page.css)
+</style></head><body><p id="lost" hidden></p><main>
+<h1>rar2fs-dock <span class="badge $badge">$label</span></h1>
+<p class="sub">$up of $all folders are up · last checked $(when "$(date +%s)")</p>
+<p class="sub"><a href="status.html">Log in</a> for the details.</p>
+</main>
+<script>
+$(cat /usr/local/bin/page.js)
+</script></body></html>
+HTML
+    ;;
+  *) rm -f "$pub" ;;
+esac
 
 status-data 2>/dev/null || true                  # same data as status.json and /metrics

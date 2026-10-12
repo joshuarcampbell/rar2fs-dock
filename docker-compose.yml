@@ -96,6 +96,9 @@ services:
       # token for status.json and /metrics.
       HEARTBEAT_URL: ${HEARTBEAT_URL:-}
       STATUS_TOKEN: ${STATUS_TOKEN:-}
+      # A status page that opens without a login: off, minimal (healthy or not), full
+      # (read-only, without settings and paths) or everything (all of it, read-only).
+      STATUS_PUBLIC: ${STATUS_PUBLIC:-off}
       # Restart automatically after 3 failed health checks in a row. 0 = off.
       AUTO_RESTART: ${AUTO_RESTART:-1}
       # Run the health report every N days and alert on new problems. 0 = never.

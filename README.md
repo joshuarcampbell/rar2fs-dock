@@ -888,6 +888,34 @@ opening a terminal. Choose *Everything* or a single folder first - one folder is
 quicker. The page shows *running* while it works and updates by itself when the result
 is in. Only one report runs at a time.
 
+**A page without a login.** By default every page needs the login. If you'd like
+people on your network to see how things are without one - a tablet on the wall, the
+rest of the household - set `STATUS_PUBLIC` in `.env` and run `docker compose up -d`.
+The public page is at `https://<this-PC's-IP>:8766/public.html`, and the bare address
+(`https://<this-PC's-IP>:8766/`) takes anyone who isn't logged in straight to it.
+
+| `STATUS_PUBLIC=` | What anyone on your network can see |
+|---|---|
+| `off` (the default) | Nothing. Every page asks for the login. |
+| `minimal` | One line: healthy or not, and how many folders are up. No names of any kind. |
+| `full` | The status page, read-only: folders, what is being read and by which login, the library, recently added, duplicates, versions, the health report and recent events. |
+| `everything` | All of the status page's information: what `full` shows, plus where each folder comes from, the details of the setup check, every setting, and the search box. `status.json` and `/metrics` open without a login too. |
+
+Whichever you choose, the public page can't do anything: there are no buttons on it,
+and starting a report or a scan, ignoring a problem and the logged-in status page all
+still need the login. All of them update by themselves like the logged-in page.
+
+How to choose:
+
+- **`minimal`** gives away nothing but that the drive exists and whether it's well.
+- **`full`** shows the household what's on the drive and who is watching what. It
+  leaves out the settings (which name your logins and your media server), where each
+  folder comes from, the details of the setup check (it says only how many there are)
+  and search - things that describe your setup rather than your library.
+- **`everything`** holds nothing back except the buttons. It is meant for a network you
+  trust, or one that is kept apart from the rest (its own VLAN, say). Passwords, tokens
+  and addresses that contain one are still never shown, on any page.
+
 ### What's in use, and restart warnings
 
 **In use now** on the status page lists every file being read from the drive at this
@@ -1543,6 +1571,7 @@ it, under **Every setting** (passwords and tokens are hidden).
 | `NOTIFY_URL` | Where to send [notifications](#notifications) | none |
 | `HEARTBEAT_URL` | A URL to ping every minute while healthy - see [Dashboards and monitoring](#dashboards-and-monitoring) | none |
 | `STATUS_TOKEN` | A read-only token for `status.json`, `/metrics` and the RSS feed | none |
+| `STATUS_PUBLIC` | A [status page without a login](#status-page): `off`, `minimal`, `full` or `everything` | `off` |
 | `AUTO_RESTART` | [Restart](#automatic-restart) after three failed health checks | `1` (on) |
 | `HEALTH_REPORT_DAYS` | Days between scheduled [health reports](#health-report); `0` = never | `7` |
 | `LIBRARY_INDEX_MINUTES` | Minutes between rebuilds of the [library](#the-library-search-recently-added-duplicates-sizes) index | `10` |
@@ -1707,6 +1736,15 @@ the mistakes below by itself and says how to fix them.
   starting a size scan, ignoring a problem) are only accepted from the page itself,
   and it can't be embedded in another site. Anyone with a login can see who is reading
   what under *In use now*; if that matters, keep the logins to people you'd tell anyway.
+- **The public page is off unless you turn it on,** and can only be looked at. With
+  `STATUS_PUBLIC=minimal` anyone on your network can learn that the drive exists and
+  whether it is healthy. With `full` they can also see your folder names, what is on
+  the drive and which login is reading what - but not your settings or your source
+  paths. With `everything` they see those too: login names, source paths, your media
+  server's address and the rest of the settings, which is useful to someone trying to
+  get in - so keep it to a network you trust or one kept apart from the rest. No
+  setting lets anyone start an action without the login, and passwords and tokens are
+  never shown. See [Status page](#status-page).
 - **The status token is read-only.** If you set `STATUS_TOKEN`, it can fetch
   `status.json`, `/metrics` and the RSS feed and nothing else: not the page, not the
   report, and it can't start anything. It travels in the address, so treat it like a password and
