@@ -63,6 +63,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=build /usr/lib/libunrar.so /usr/lib/
 COPY --from=build /usr/local/bin/rar2fs /usr/local/bin/rclone /usr/local/bin/
+COPY VERSION /etc/rar2fs-dock-version
 COPY entrypoint.sh /entrypoint.sh
 COPY scripts/ /usr/local/bin/
 

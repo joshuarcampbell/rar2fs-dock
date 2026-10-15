@@ -1131,6 +1131,12 @@ devices need anything (new files for a Linux machine, or a new certificate). If
 something is being read from the drive it says so and asks before going on; `-Force`
 skips the question.
 
+You don't have to watch for new versions: once a day the container compares its own
+version (the `VERSION` file) with the one on GitHub. When yours is behind, the
+status page's *Versions* table says *update available* on the *rar2fs-dock (this
+setup)* row, and you get a notification if `NOTIFY_URL` is set. On Linux, update with
+`git pull` and then `docker compose up -d --build`.
+
 If you're coming from a version that kept your folders in `docker-compose.yml`, it
 first moves them into `docker-compose.override.yml` - your network shares too - so
 the update can't overwrite them. Your old file is kept as

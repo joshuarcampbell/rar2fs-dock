@@ -124,7 +124,7 @@ while sleep "$INTERVAL"; do
   if [ "$(age /state/versions)" -gt 86400 ]; then
     found=$(update-check)
     if [ -n "$found" ] && [ "$found" != "$(cat /state/versions.notified 2>/dev/null)" ]; then
-      notify "Update available" "$found. Change the version and SHA-256 in the Dockerfile, then: docker compose up -d --build"
+      notify "Update available" "$found. See Updating in the README."
       printf '%s' "$found" > /state/versions.notified
     fi
   fi

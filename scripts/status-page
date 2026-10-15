@@ -114,16 +114,18 @@ echo "<p class=\"sub\" style=\"margin:10px 0 0\">$( [ -n "$passed" ] && printf '
 library-html 2>/dev/null       # overview, recently added, duplicates
 
 echo '<section><h2>Versions</h2><table><tr><th>Component</th><th>In this image</th><th>Latest</th><th></th></tr>'
-for c in unrar rar2fs rclone; do
+for c in dock unrar rar2fs rclone; do
   # "In this image" comes from the running image itself, never from the saved check
-  case "$c" in unrar) b=$UNRAR_VERSION ;; rar2fs) b=$RAR2FS_VERSION ;; *) b=$VERSION_RCLONE ;; esac
+  case "$c" in dock) b=$(cat /etc/rar2fs-dock-version 2>/dev/null) ;; unrar) b=$UNRAR_VERSION ;;
+    rar2fs) b=$RAR2FS_VERSION ;; *) b=$VERSION_RCLONE ;; esac
   l=$(val "${c}_latest")
   if [ -z "$l" ]; then note='<span class="dim">not checked yet</span>'
   elif [ "$b" = "$l" ] || [ "$(printf '%s\n%s\n' "$b" "$l" | sort -V | tail -1)" = "$b" ]; then note='<span class="badge ok">up to date</span>'
   else note='<span class="badge wait">update available</span>'; fi
-  printf '<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n' "$c" "${b:-?}" "${l:--}" "$note"
+  name=$c; [ "$c" = dock ] && name='rar2fs-dock (this setup)'
+  printf '<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n' "$name" "${b:-?}" "${l:--}" "$note"
 done
-c=$(val checked); echo "</table><p class=\"sub\" style=\"margin:10px 0 0\">$( [ -n "$c" ] && printf 'Last checked %s' "$(when "$c")" || echo 'Checked once a day.')</p></section>"
+c=$(val checked); echo "</table><p class=\"sub\" style=\"margin:10px 0 0\">$( [ -n "$c" ] && printf 'Last checked %s' "$(when "$c")" || echo 'Checked once a day.'). A newer rar2fs-dock: run <code>rar2fs.ps1 update</code> (on Linux: <code>git pull</code>, then <code>docker compose up -d --build</code>).</p></section>"
 
 echo '<section><h2>Health report</h2>'
 if [ -f /state/report.running ]; then
